@@ -61,31 +61,66 @@ export default function Home() {
       const { meta, chunks } = startData;
       const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
       setProgress({ current: 0, total: translatableChunks.length });
-      setStatus(`解析完成，共 ${translatableChunks.length} 个文本块需要翻译`);
 
-      // Step 2: Translate chunks one by one
-      const translatedParts: string[] = [];
-      let translated = 0;
-
-      for (const chunk of chunks) {
-        if (!chunk.translatable) {
-          translatedParts.push(chunk.text);
-          continue;
-        }
-
-        setStatus(`正在翻译 (${translated + 1}/${translatableChunks.length})...`);
-        const trRes = await fetch("/api/ingest/translate", {
+      // Step 1.5: Extract glossary from first few translatable chunks
+      setStatus("正在提取术语表...");
+      const glossaryText = translatableChunks.slice(0, 3).map((c: { text: string }) => c.text).join("\n");
+      let glossary = {};
+      try {
+        const gRes = await fetch("/api/ingest/glossary", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunk.text }),
+          body: JSON.stringify({ text: glossaryText.slice(0, 4000) }),
         });
-        const trData = await trRes.json();
-        if (!trRes.ok) throw new Error(trData.error);
-
-        translatedParts.push(trData.translated);
-        translated++;
-        setProgress({ current: translated, total: translatableChunks.length });
+        const gData = await gRes.json();
+        glossary = gData.glossary || {};
+      } catch {
+        // glossary extraction failed, continue without it
       }
+
+      // Step 2: Translate chunks in parallel (concurrency = 4)
+      const CONCURRENCY = 4;
+      const results: (string | null)[] = new Array(chunks.length).fill(null);
+      let completed = 0;
+
+      // Fill in non-translatable chunks immediately
+      for (let i = 0; i < chunks.length; i++) {
+        if (!chunks[i].translatable) {
+          results[i] = chunks[i].text;
+        }
+      }
+
+      // Get indices of translatable chunks
+      const translatableIndices = chunks
+        .map((c: { translatable: boolean }, i: number) => c.translatable ? i : -1)
+        .filter((i: number) => i !== -1);
+
+      setStatus(`开始并行翻译 ${translatableIndices.length} 个文本块...`);
+
+      // Process in batches of CONCURRENCY
+      for (let batch = 0; batch < translatableIndices.length; batch += CONCURRENCY) {
+        const batchIndices = translatableIndices.slice(batch, batch + CONCURRENCY);
+        const promises = batchIndices.map(async (idx: number) => {
+          const trRes = await fetch("/api/ingest/translate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunks[idx].text, glossary }),
+          });
+          const trData = await trRes.json();
+          if (!trRes.ok) throw new Error(trData.error);
+          return { idx, translated: trData.translated };
+        });
+
+        const batchResults = await Promise.all(promises);
+        for (const { idx, translated } of batchResults) {
+          results[idx] = translated;
+          completed++;
+        }
+        setProgress({ current: completed, total: translatableIndices.length });
+        setStatus(`正在翻译 (${completed}/${translatableIndices.length})...`);
+      }
+
+      const translatedParts = results as string[];
 
       // Step 3: Save and generate knowledge pages
       setStatus("正在生成知识页面...");
