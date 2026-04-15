@@ -1,10 +1,12 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { TexSection } from './arxiv';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  baseURL: process.env.ANTHROPIC_BASE_URL,
+const client = new OpenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  baseURL: process.env.GOOGLE_GEMINI_BASE_URL,
 });
+
+const MODEL = 'gemini-3-flash-preview';
 
 const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任务是将英文 LaTeX 论文内容翻译为中文。
 
@@ -20,35 +22,26 @@ const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任
 export async function translateTexChunk(text: string): Promise<string> {
   if (!text.trim()) return text;
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+  const response = await client.chat.completions.create({
+    model: MODEL,
     max_tokens: 8192,
-    system: SYSTEM_PROMPT,
     messages: [
-      {
-        role: 'user',
-        content: `请翻译以下 LaTeX 内容为中文：\n\n${text}`,
-      },
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: `请翻译以下 LaTeX 内容为中文：\n\n${text}` },
     ],
   });
 
-  const block = response.content[0];
-  if (block.type === 'text') {
-    return block.text;
-  }
-  return text;
+  return response.choices[0]?.message?.content || text;
 }
 
 export async function translateFullTex(sections: TexSection[]): Promise<string> {
   const results: string[] = [];
 
-  // Batch translatable sections to reduce API calls
   let currentBatch = '';
-  const BATCH_SIZE = 3000; // characters per batch
+  const BATCH_SIZE = 3000;
 
   for (const section of sections) {
     if (!section.translatable) {
-      // Flush current batch if any
       if (currentBatch.trim()) {
         const translated = await translateTexChunk(currentBatch);
         results.push(translated);
@@ -66,7 +59,6 @@ export async function translateFullTex(sections: TexSection[]): Promise<string> 
     }
   }
 
-  // Flush remaining batch
   if (currentBatch.trim()) {
     const translated = await translateTexChunk(currentBatch);
     results.push(translated);
@@ -87,8 +79,8 @@ export async function extractKnowledge(
   abstract: string,
   translatedContent: string
 ): Promise<ExtractedKnowledge> {
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+  const response = await client.chat.completions.create({
+    model: MODEL,
     max_tokens: 4096,
     messages: [
       {
@@ -116,11 +108,11 @@ export async function extractKnowledge(
     ],
   });
 
-  const block = response.content[0];
-  if (block.type === 'text') {
-    const jsonStr = block.text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const raw = response.choices[0]?.message?.content || '';
+  try {
+    const jsonStr = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     return JSON.parse(jsonStr);
+  } catch {
+    return { concepts: [], entities: [], summary: '', titleCn: title };
   }
-
-  return { concepts: [], entities: [], summary: '', titleCn: title };
 }
