@@ -1,10 +1,12 @@
 import OpenAI from 'openai';
 import { TexSection } from './arxiv';
 
-const client = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  baseURL: process.env.GOOGLE_GEMINI_BASE_URL,
-});
+function getClient() {
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: process.env.OPENAI_BASE_URL,
+  });
+}
 
 const MODEL = 'gemini-3-flash-preview';
 
@@ -22,7 +24,7 @@ const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任
 export async function translateTexChunk(text: string): Promise<string> {
   if (!text.trim()) return text;
 
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     max_tokens: 8192,
     messages: [
@@ -79,7 +81,7 @@ export async function extractKnowledge(
   abstract: string,
   translatedContent: string
 ): Promise<ExtractedKnowledge> {
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     max_tokens: 4096,
     messages: [
