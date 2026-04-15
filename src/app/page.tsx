@@ -63,7 +63,7 @@ export default function Home() {
       setProgress({ current: 0, total: translatableChunks.length });
 
       // Step 2: Translate chunks in parallel (concurrency = 4)
-      const CONCURRENCY = 4;
+      const CONCURRENCY = 32;
       const results: (string | null)[] = new Array(chunks.length).fill(null);
       let completed = 0;
 
