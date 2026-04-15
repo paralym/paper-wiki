@@ -62,22 +62,6 @@ export default function Home() {
       const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
       setProgress({ current: 0, total: translatableChunks.length });
 
-      // Step 1.5: Extract glossary from first few translatable chunks
-      setStatus("正在提取术语表...");
-      const glossaryText = translatableChunks.slice(0, 3).map((c: { text: string }) => c.text).join("\n");
-      let glossary = {};
-      try {
-        const gRes = await fetch("/api/ingest/glossary", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: glossaryText.slice(0, 4000) }),
-        });
-        const gData = await gRes.json();
-        glossary = gData.glossary || {};
-      } catch {
-        // glossary extraction failed, continue without it
-      }
-
       // Step 2: Translate chunks in parallel (concurrency = 4)
       const CONCURRENCY = 4;
       const results: (string | null)[] = new Array(chunks.length).fill(null);
@@ -104,7 +88,7 @@ export default function Home() {
           const trRes = await fetch("/api/ingest/translate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: chunks[idx].text, glossary }),
+            body: JSON.stringify({ text: chunks[idx].text }),
           });
           const trData = await trRes.json();
           if (!trRes.ok) throw new Error(trData.error);
