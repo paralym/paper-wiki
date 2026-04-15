@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 interface PaperResponse {
@@ -23,9 +24,26 @@ interface PaperResponse {
 
 export default function PaperPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
+  const router = useRouter();
   const [paper, setPaper] = useState<PaperResponse | null>(null);
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<'translated' | 'original' | 'side-by-side'>('side-by-side');
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!confirm("确定删除这篇论文及其关联的概念/实体？")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/papers/${slug}/delete`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      router.push("/");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "删除失败";
+      setError(msg);
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/papers/${slug}`)
@@ -144,11 +162,18 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
         />
       )}
 
-      {/* Back */}
-      <div className="mt-12 pt-6 border-t border-border">
+      {/* Footer */}
+      <div className="mt-12 pt-6 border-t border-border flex justify-between items-center">
         <Link href="/" className="text-accent hover:underline text-sm">
           ← 返回论文列表
         </Link>
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="px-4 py-1.5 text-sm text-red-500 border border-red-300 rounded-lg hover:bg-red-50 dark:hover:bg-red-950 transition-colors disabled:opacity-50"
+        >
+          {deleting ? "删除中..." : "删除论文"}
+        </button>
       </div>
     </article>
   );

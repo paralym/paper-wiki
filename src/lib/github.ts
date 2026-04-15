@@ -37,6 +37,18 @@ export async function putFile(path: string, content: string, message: string, sh
   }
 }
 
+export async function deleteFile(path: string, message: string): Promise<boolean> {
+  const file = await getFile(path);
+  if (!file) return false;
+
+  const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${path}`, {
+    method: 'DELETE',
+    headers: headers(),
+    body: JSON.stringify({ message, sha: file.sha }),
+  });
+  return res.ok;
+}
+
 export async function listDir(path: string): Promise<{ name: string; path: string }[]> {
   const res = await fetch(`https://api.github.com/repos/${REPO}/contents/${path}`, {
     headers: headers(),
