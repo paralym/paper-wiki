@@ -21,7 +21,7 @@ export async function translateTexChunk(text: string): Promise<string> {
   if (!text.trim()) return text;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 8192,
     system: SYSTEM_PROMPT,
     messages: [
@@ -88,7 +88,7 @@ export async function extractKnowledge(
   translatedContent: string
 ): Promise<ExtractedKnowledge> {
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 4096,
     messages: [
       {
