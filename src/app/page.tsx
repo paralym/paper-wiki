@@ -127,122 +127,55 @@ export default function Home() {
       if (!startRes.ok) throw new Error(startData.error);
       const { meta } = startData;
 
-      // Step 1.5: Check if HTML version is available
-      setStatus("检查 HTML 版本...");
-      const checkRes = await fetch("/api/ingest/check-html", {
+      // Step 2: Download and parse LaTeX
+      setStatus("正在下载并解析论文...");
+      const parseRes = await fetch("/api/ingest/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ arxivId: meta.arxivId }),
       });
-      const { available: htmlAvailable } = await safeJson(checkRes);
+      const parseData = await safeJson(parseRes);
+      if (!parseRes.ok) throw new Error(parseData.error);
 
-      let finishData;
+      const { chunks } = parseData;
+      setProgress({ current: 0, total: chunks.length });
 
-      if (htmlAvailable) {
-        // === HTML mode: better rendering ===
-        setStatus("正在获取并解析 HTML 版本...");
-        const parseRes = await fetch("/api/ingest/parse-html", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ arxivId: meta.arxivId }),
-        });
-        const parseData = await safeJson(parseRes);
-        if (!parseRes.ok) throw new Error(parseData.error);
+      // Step 3: Translate all chunks in parallel
+      const CONCURRENCY = 32;
+      const results: string[] = new Array(chunks.length).fill('');
+      let completed = 0;
 
-        const { groups } = parseData;
-        setProgress({ current: 0, total: groups.length });
-
-        // Translate groups in parallel
-        const CONCURRENCY = 32;
-        const translations: { id: string; text: string }[] = [];
-        let completed = 0;
-        const SEP = '\n---CHUNK_BOUNDARY---\n';
-
-        for (let batch = 0; batch < groups.length; batch += CONCURRENCY) {
-          const batchSlice = groups.slice(batch, batch + CONCURRENCY);
-          const promises = batchSlice.map(async (group: { index: number; chunkIds: string[]; text: string }) => {
-            const trRes = await fetch("/api/ingest/translate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: group.text }),
-            });
-            const trData = await safeJson(trRes);
-            if (!trRes.ok) throw new Error(trData.error);
-            // Split translated text back into individual chunks
-            const parts = trData.translated.split(SEP);
-            return group.chunkIds.map((id: string, i: number) => ({
-              id,
-              text: (parts[i] || parts[0] || '').trim(),
-            }));
+      for (let batch = 0; batch < chunks.length; batch += CONCURRENCY) {
+        const batchSlice = chunks.slice(batch, batch + CONCURRENCY);
+        const promises = batchSlice.map(async (chunk: { index: number; text: string }, i: number) => {
+          const trRes = await fetch("/api/ingest/translate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunk.text }),
           });
+          const trData = await safeJson(trRes);
+          if (!trRes.ok) throw new Error(trData.error);
+          return { idx: batch + i, translated: trData.translated };
+        });
 
-          const batchResults = await Promise.all(promises);
-          for (const chunkTranslations of batchResults) {
-            translations.push(...chunkTranslations);
-            completed++;
-          }
-          setProgress({ current: completed, total: groups.length });
-          setStatus(`正在翻译 (${completed}/${groups.length})...`);
+        const batchResults = await Promise.all(promises);
+        for (const { idx, translated } of batchResults) {
+          results[idx] = translated;
+          completed++;
         }
-
-        // Finish: assemble bilingual HTML
-        setStatus("正在生成双语页面...");
-        const finishRes = await fetch("/api/ingest/finish-html", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ meta, translations }),
-        });
-        finishData = await safeJson(finishRes);
-        if (!finishRes.ok) throw new Error(finishData.error);
-      } else {
-        // === LaTeX fallback mode ===
-        setStatus("HTML 版本不可用，使用 LaTeX 模式...");
-        const parseRes = await fetch("/api/ingest/parse", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ arxivId: meta.arxivId }),
-        });
-        const parseData = await safeJson(parseRes);
-        if (!parseRes.ok) throw new Error(parseData.error);
-
-        const { chunks } = parseData;
-        setProgress({ current: 0, total: chunks.length });
-
-        const CONCURRENCY = 32;
-        const results: string[] = new Array(chunks.length).fill('');
-        let completed = 0;
-
-        for (let batch = 0; batch < chunks.length; batch += CONCURRENCY) {
-          const batchSlice = chunks.slice(batch, batch + CONCURRENCY);
-          const promises = batchSlice.map(async (chunk: { index: number; text: string }, i: number) => {
-            const trRes = await fetch("/api/ingest/translate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: chunk.text }),
-            });
-            const trData = await safeJson(trRes);
-            if (!trRes.ok) throw new Error(trData.error);
-            return { idx: batch + i, translated: trData.translated };
-          });
-
-          const batchResults = await Promise.all(promises);
-          for (const { idx, translated } of batchResults) {
-            results[idx] = translated;
-            completed++;
-          }
-          setProgress({ current: completed, total: chunks.length });
-          setStatus(`正在翻译 (${completed}/${chunks.length})...`);
-        }
-
-        setStatus("正在生成知识页面...");
-        const finishRes = await fetch("/api/ingest/finish", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ meta, translatedTex: results.join("\n\n") }),
-        });
-        finishData = await safeJson(finishRes);
-        if (!finishRes.ok) throw new Error(finishData.error);
+        setProgress({ current: completed, total: chunks.length });
+        setStatus(`正在翻译 (${completed}/${chunks.length})...`);
       }
+
+      // Step 4: Save
+      setStatus("正在保存...");
+      const finishRes = await fetch("/api/ingest/finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meta, translatedTex: results.join("\n\n") }),
+      });
+      const finishData = await safeJson(finishRes);
+      if (!finishRes.ok) throw new Error(finishData.error);
 
       setStatus(`完成: ${finishData.title}`);
       setUrl("");
