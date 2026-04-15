@@ -108,42 +108,126 @@ export async function downloadLatexSource(arxivId: string): Promise<string> {
   return texContent;
 }
 
-async function findMainTexFile(dir: string): Promise<string> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const texFiles: string[] = [];
+// Conference template file patterns — these should be skipped
+const TEMPLATE_PATTERNS = [
+  /^(iclr|nips|neurips|icml|acl|aaai|cvpr|eccv|iccv|emnlp|naacl|coling|sigir)/i,
+  /^(template|example|sample|instructions|formatting)/i,
+  /^llncs/i,  // Springer LNCS template
+];
 
+function isTemplateFile(filename: string, content: string): boolean {
+  const base = path.basename(filename, '.tex');
+
+  // Check filename patterns
+  if (TEMPLATE_PATTERNS.some(p => p.test(base))) return true;
+
+  // Check content: templates have formatting instructions, not research content
+  if (content.includes('formatting instructions') ||
+      content.includes('style file') ||
+      content.includes('camera-ready') ||
+      (content.includes('\\usepackage') && !content.includes('\\input{') && !content.includes('\\section{Introduction'))) {
+    // If it looks like pure instructions with no real content sections, it's a template
+    const hasResearchSections = /\\section\{(Introduction|Related|Method|Experiment|Result|Approach|Background)/i.test(content);
+    if (!hasResearchSections) return true;
+  }
+
+  return false;
+}
+
+async function collectTexFiles(dir: string): Promise<string[]> {
+  const texFiles: string[] = [];
+  const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isFile() && entry.name.endsWith('.tex')) {
       texFiles.push(fullPath);
     } else if (entry.isDirectory()) {
-      const subEntries = await fs.readdir(fullPath);
-      for (const sub of subEntries) {
-        if (sub.endsWith('.tex')) {
-          texFiles.push(path.join(fullPath, sub));
-        }
-      }
+      const subFiles = await collectTexFiles(fullPath);
+      texFiles.push(...subFiles);
+    }
+  }
+  return texFiles;
+}
+
+async function resolveInputs(content: string, baseDir: string): Promise<string> {
+  // Recursively resolve \input{} and \include{} directives
+  const inputPattern = /\\(?:input|include)\{([^}]+)\}/g;
+  let result = content;
+  let match;
+
+  // Reset regex
+  const matches: { full: string; file: string }[] = [];
+  while ((match = inputPattern.exec(content)) !== null) {
+    matches.push({ full: match[0], file: match[1] });
+  }
+
+  for (const m of matches) {
+    let inputPath = m.file;
+    if (!inputPath.endsWith('.tex')) inputPath += '.tex';
+
+    const fullPath = path.join(baseDir, inputPath);
+    try {
+      let inputContent = await fs.readFile(fullPath, 'utf-8');
+      // Recursively resolve nested inputs
+      inputContent = await resolveInputs(inputContent, path.dirname(fullPath));
+      result = result.replace(m.full, inputContent);
+    } catch {
+      // File not found, leave the \input{} as-is
     }
   }
 
-  for (const f of texFiles) {
-    if (path.basename(f) === 'main.tex') {
-      return await fs.readFile(f, 'utf-8');
-    }
+  return result;
+}
+
+async function findMainTexFile(dir: string): Promise<string> {
+  const texFiles = await collectTexFiles(dir);
+
+  if (texFiles.length === 0) {
+    throw new Error('在源码包中未找到 .tex 文件');
   }
 
+  // Read all files
+  const fileContents: { path: string; content: string; size: number }[] = [];
   for (const f of texFiles) {
     const content = await fs.readFile(f, 'utf-8');
-    if (content.includes('\\begin{document}')) {
-      return content;
-    }
+    fileContents.push({ path: f, content, size: content.length });
   }
 
-  if (texFiles.length > 0) {
-    return await fs.readFile(texFiles[0], 'utf-8');
+  // Filter out template files
+  const candidates = fileContents.filter(f => !isTemplateFile(f.path, f.content));
+  const pool = candidates.length > 0 ? candidates : fileContents;
+
+  // Priority 1: file named main.tex
+  const mainTex = pool.find(f => path.basename(f.path) === 'main.tex');
+  if (mainTex) {
+    return await resolveInputs(mainTex.content, path.dirname(mainTex.path));
   }
 
-  throw new Error('在源码包中未找到 .tex 文件');
+  // Priority 2: file with \begin{document} and \input{} (multi-file project root)
+  const withInputs = pool.filter(f =>
+    f.content.includes('\\begin{document}') && /\\input\{/.test(f.content)
+  );
+  if (withInputs.length > 0) {
+    // Pick the one with the most \input{} directives (likely the root)
+    withInputs.sort((a, b) => {
+      const countA = (a.content.match(/\\input\{/g) || []).length;
+      const countB = (b.content.match(/\\input\{/g) || []).length;
+      return countB - countA;
+    });
+    return await resolveInputs(withInputs[0].content, path.dirname(withInputs[0].path));
+  }
+
+  // Priority 3: largest file with \begin{document}
+  const withDoc = pool
+    .filter(f => f.content.includes('\\begin{document}'))
+    .sort((a, b) => b.size - a.size);
+  if (withDoc.length > 0) {
+    return await resolveInputs(withDoc[0].content, path.dirname(withDoc[0].path));
+  }
+
+  // Priority 4: largest file overall
+  pool.sort((a, b) => b.size - a.size);
+  return await resolveInputs(pool[0].content, path.dirname(pool[0].path));
 }
 
 export interface TexChunk {
