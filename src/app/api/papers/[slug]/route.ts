@@ -8,9 +8,24 @@ export async function GET(
 ) {
   try {
     const { slug } = await params;
-    const { data, content } = await getPaperContent(slug);
-    const html = await renderMarkdown(content);
-    return NextResponse.json({ data, html, content });
+    const result = await getPaperContent(slug);
+
+    if (result.mode === 'html') {
+      return NextResponse.json({
+        data: result.data,
+        mode: 'html',
+        originalHtml: result.data.originalHtml,
+        translatedHtml: result.data.translatedHtml,
+      });
+    }
+
+    const html = await renderMarkdown(result.content);
+    return NextResponse.json({
+      data: result.data,
+      mode: 'markdown',
+      html,
+      content: result.content,
+    });
   } catch {
     return NextResponse.json({ error: '论文未找到' }, { status: 404 });
   }

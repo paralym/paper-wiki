@@ -157,7 +157,23 @@ async function readMarkdownDir(dirPath: string) {
 }
 
 export async function listPapers() {
-  return readMarkdownDir('wiki/papers');
+  const files = await listDir('wiki/papers');
+  const results = [];
+  for (const f of files) {
+    if (!f.name.endsWith('.md') && !f.name.endsWith('.json')) continue;
+    const file = await getFile(f.path);
+    if (!file) continue;
+    if (f.name.endsWith('.json')) {
+      try {
+        const data = JSON.parse(file.content);
+        results.push({ slug: f.name.replace('.json', ''), data });
+      } catch { continue; }
+    } else {
+      const { data } = matter(file.content);
+      results.push({ slug: f.name.replace('.md', ''), data });
+    }
+  }
+  return results;
 }
 
 export async function listConcepts() {
@@ -169,9 +185,16 @@ export async function listEntities() {
 }
 
 export async function getPaperContent(slug: string) {
-  const file = await getFile(`wiki/papers/${slug}.md`);
-  if (!file) throw new Error('论文未找到');
-  return matter(file.content);
+  // Try JSON first (HTML mode), then markdown
+  const jsonFile = await getFile(`wiki/papers/${slug}.json`);
+  if (jsonFile) {
+    const data = JSON.parse(jsonFile.content);
+    return { data, content: '', mode: 'html' as const };
+  }
+  const mdFile = await getFile(`wiki/papers/${slug}.md`);
+  if (!mdFile) throw new Error('论文未找到');
+  const parsed = matter(mdFile.content);
+  return { data: parsed.data, content: parsed.content, mode: 'markdown' as const };
 }
 
 export async function getConceptContent(slug: string) {

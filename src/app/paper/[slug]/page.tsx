@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 
-interface PaperData {
+interface PaperResponse {
   data: {
     title: string;
     title_en?: string;
@@ -15,14 +15,17 @@ interface PaperData {
     entities: string[];
     summary: string;
   };
-  html: string;
-  content: string;
+  mode: 'html' | 'markdown';
+  originalHtml?: string;
+  translatedHtml?: string;
+  html?: string;
 }
 
 export default function PaperPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
-  const [paper, setPaper] = useState<PaperData | null>(null);
+  const [paper, setPaper] = useState<PaperResponse | null>(null);
   const [error, setError] = useState("");
+  const [viewMode, setViewMode] = useState<'translated' | 'original' | 'side-by-side'>('side-by-side');
 
   useEffect(() => {
     fetch(`/api/papers/${slug}`)
@@ -48,16 +51,17 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
   }
 
   const { data } = paper;
+  const isHtmlMode = paper.mode === 'html';
 
   return (
-    <article className="max-w-3xl mx-auto">
+    <article className={isHtmlMode && viewMode === 'side-by-side' ? 'max-w-7xl mx-auto' : 'max-w-4xl mx-auto'}>
       {/* Header */}
-      <header className="mb-8">
+      <header className="mb-6">
         <h1 className="text-2xl font-bold mb-2">{data.title}</h1>
         {data.title_en && (
-          <p className="text-muted mb-4">{data.title_en}</p>
+          <p className="text-muted mb-3">{data.title_en}</p>
         )}
-        <div className="flex flex-wrap gap-3 text-sm text-muted mb-4">
+        <div className="flex flex-wrap gap-3 text-sm text-muted mb-3">
           <a
             href={`https://arxiv.org/abs/${data.arxiv_id}`}
             target="_blank"
@@ -67,50 +71,78 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
             arXiv:{data.arxiv_id}
           </a>
           <span>{data.date}</span>
-        </div>
-        <div className="text-sm mb-4">
-          <span className="text-muted">作者: </span>
-          {data.authors?.join(", ")}
+          <span>{data.authors?.slice(0, 3).join(", ")}{(data.authors?.length ?? 0) > 3 ? " ..." : ""}</span>
         </div>
         {data.summary && (
-          <div className="bg-accent-light border border-border rounded-lg p-4 text-sm">
+          <div className="bg-accent-light border border-border rounded-lg p-3 text-sm mb-3">
             <strong>摘要: </strong>{data.summary}
           </div>
         )}
 
         {/* Tags */}
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5 mb-4">
           {data.categories?.map((cat) => (
-            <span key={cat} className="px-2 py-0.5 bg-accent-light text-accent text-xs rounded">
-              {cat}
-            </span>
+            <span key={cat} className="px-2 py-0.5 bg-accent-light text-accent text-xs rounded">{cat}</span>
           ))}
           {data.concepts?.map((c) => (
-            <Link
-              key={c}
-              href={`/concept/${c.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`}
+            <Link key={c} href={`/concept/${c.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`}
               className="px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 text-xs rounded hover:opacity-80"
-            >
-              {c}
-            </Link>
-          ))}
-          {data.entities?.map((e) => (
-            <Link
-              key={e}
-              href={`/entity/${e.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`}
-              className="px-2 py-0.5 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 text-xs rounded hover:opacity-80"
-            >
-              {e}
-            </Link>
+            >{c}</Link>
           ))}
         </div>
+
+        {/* View mode toggle */}
+        {isHtmlMode && (
+          <div className="flex gap-1 bg-border rounded-lg p-1 w-fit">
+            {(['side-by-side', 'translated', 'original'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  viewMode === mode
+                    ? 'bg-surface text-foreground font-medium shadow-sm'
+                    : 'text-muted hover:text-foreground'
+                }`}
+              >
+                {mode === 'side-by-side' ? '双栏对照' : mode === 'translated' ? '中文译文' : '英文原文'}
+              </button>
+            ))}
+          </div>
+        )}
       </header>
 
       {/* Content */}
-      <div
-        className="paper-content"
-        dangerouslySetInnerHTML={{ __html: paper.html }}
-      />
+      {isHtmlMode ? (
+        <div className={viewMode === 'side-by-side' ? 'grid grid-cols-2 gap-4' : ''}>
+          {(viewMode === 'original' || viewMode === 'side-by-side') && (
+            <div className="border border-border rounded-lg p-6 overflow-auto">
+              {viewMode === 'side-by-side' && (
+                <div className="text-xs text-muted mb-3 font-medium uppercase tracking-wide">原文 Original</div>
+              )}
+              <div
+                className="arxiv-content"
+                dangerouslySetInnerHTML={{ __html: paper.originalHtml || '' }}
+              />
+            </div>
+          )}
+          {(viewMode === 'translated' || viewMode === 'side-by-side') && (
+            <div className="border border-border rounded-lg p-6 overflow-auto">
+              {viewMode === 'side-by-side' && (
+                <div className="text-xs text-muted mb-3 font-medium uppercase tracking-wide">译文 Translation</div>
+              )}
+              <div
+                className="arxiv-content"
+                dangerouslySetInnerHTML={{ __html: paper.translatedHtml || '' }}
+              />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div
+          className="paper-content"
+          dangerouslySetInnerHTML={{ __html: paper.html || '' }}
+        />
+      )}
 
       {/* Back */}
       <div className="mt-12 pt-6 border-t border-border">

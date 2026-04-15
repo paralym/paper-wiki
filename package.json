@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.89.0",
+    "cheerio": "^1.2.0",
     "gray-matter": "^4.0.3",
     "katex": "^0.16.45",
     "lucide-react": "^1.8.0",

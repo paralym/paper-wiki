@@ -97,3 +97,73 @@ body {
   margin: 1rem 0;
   color: var(--muted);
 }
+
+/* arxiv HTML content styling */
+.arxiv-content {
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.arxiv-content img {
+  max-width: 100%;
+  height: auto;
+  margin: 1rem 0;
+}
+
+.arxiv-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+}
+
+.arxiv-content th, .arxiv-content td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+.arxiv-content th {
+  background: var(--accent-light);
+  font-weight: 600;
+}
+
+.arxiv-content h2, .arxiv-content .ltx_title_section {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.arxiv-content h3, .arxiv-content .ltx_title_subsection {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.arxiv-content p, .arxiv-content .ltx_p {
+  margin-bottom: 0.75rem;
+}
+
+.arxiv-content figure {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.arxiv-content figcaption, .arxiv-content .ltx_caption {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+}
+
+.arxiv-content a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.arxiv-content a:hover {
+  text-decoration: underline;
+}
