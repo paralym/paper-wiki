@@ -37,28 +37,67 @@ export default function Home() {
     }
   }
 
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+
   async function handleIngest(e: React.FormEvent) {
     e.preventDefault();
     if (!url.trim()) return;
 
     setLoading(true);
     setError("");
-    setStatus("正在下载 LaTeX 源码...");
+    setProgress({ current: 0, total: 0 });
 
     try {
-      const res = await fetch("/api/ingest", {
+      // Step 1: Download and parse LaTeX
+      setStatus("正在下载 LaTeX 源码...");
+      const startRes = await fetch("/api/ingest/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
+      const startData = await startRes.json();
+      if (!startRes.ok) throw new Error(startData.error);
 
-      const data = await res.json();
+      const { meta, chunks } = startData;
+      const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
+      setProgress({ current: 0, total: translatableChunks.length });
+      setStatus(`解析完成，共 ${translatableChunks.length} 个文本块需要翻译`);
 
-      if (!res.ok) {
-        throw new Error(data.error || "翻译失败");
+      // Step 2: Translate chunks one by one
+      const translatedParts: string[] = [];
+      let translated = 0;
+
+      for (const chunk of chunks) {
+        if (!chunk.translatable) {
+          translatedParts.push(chunk.text);
+          continue;
+        }
+
+        setStatus(`正在翻译 (${translated + 1}/${translatableChunks.length})...`);
+        const trRes = await fetch("/api/ingest/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunk.text }),
+        });
+        const trData = await trRes.json();
+        if (!trRes.ok) throw new Error(trData.error);
+
+        translatedParts.push(trData.translated);
+        translated++;
+        setProgress({ current: translated, total: translatableChunks.length });
       }
 
-      setStatus(`翻译完成: ${data.title}`);
+      // Step 3: Save and generate knowledge pages
+      setStatus("正在生成知识页面...");
+      const finishRes = await fetch("/api/ingest/finish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meta, translatedTex: translatedParts.join("") }),
+      });
+      const finishData = await finishRes.json();
+      if (!finishRes.ok) throw new Error(finishData.error);
+
+      setStatus(`完成: ${finishData.title}`);
       setUrl("");
       fetchPapers();
     } catch (err: unknown) {
@@ -67,6 +106,7 @@ export default function Home() {
       setStatus("");
     } finally {
       setLoading(false);
+      setProgress({ current: 0, total: 0 });
     }
   }
 
@@ -99,12 +139,22 @@ export default function Home() {
           <p className="mt-3 text-sm text-red-500">{error}</p>
         )}
         {loading && (
-          <div className="mt-3 flex items-center gap-2 text-sm text-muted">
-            <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            正在处理，可能需要 1-3 分钟...
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted">
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              {status}
+            </div>
+            {progress.total > 0 && (
+              <div className="w-full bg-border rounded-full h-2">
+                <div
+                  className="bg-accent h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                />
+              </div>
+            )}
           </div>
         )}
       </section>
