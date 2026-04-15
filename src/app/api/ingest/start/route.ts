@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const chunks: { index: number; text: string; translatable: boolean }[] = [];
     let batch = '';
     let batchStart = 0;
-    const BATCH_SIZE = 2000;
+    const BATCH_SIZE = 6000;
 
     for (let i = 0; i < sections.length; i++) {
       const s = sections[i];
