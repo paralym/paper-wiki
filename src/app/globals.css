@@ -102,12 +102,14 @@ body {
 .arxiv-content {
   font-size: 0.95rem;
   line-height: 1.7;
+  overflow-wrap: break-word;
 }
 
 .arxiv-content img {
   max-width: 100%;
   height: auto;
-  margin: 1rem 0;
+  margin: 1rem auto;
+  display: block;
 }
 
 .arxiv-content table {
@@ -115,6 +117,8 @@ body {
   width: 100%;
   margin: 1rem 0;
   font-size: 0.85rem;
+  overflow-x: auto;
+  display: block;
 }
 
 .arxiv-content th, .arxiv-content td {
@@ -128,42 +132,78 @@ body {
   font-weight: 600;
 }
 
-.arxiv-content h2, .arxiv-content .ltx_title_section {
-  font-size: 1.4rem;
+/* LaTeXML section headings */
+.arxiv-content .ltx_title_section,
+.arxiv-content .ltx_title_subsection,
+.arxiv-content .ltx_title_subsubsection {
   font-weight: 700;
-  margin-top: 2rem;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.arxiv-content h3, .arxiv-content .ltx_title_subsection {
-  font-size: 1.2rem;
-  font-weight: 600;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
 }
+.arxiv-content .ltx_title_section { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+.arxiv-content .ltx_title_subsection { font-size: 1.2rem; }
+.arxiv-content .ltx_title_subsubsection { font-size: 1.05rem; }
 
-.arxiv-content p, .arxiv-content .ltx_p {
-  margin-bottom: 0.75rem;
-}
+.arxiv-content .ltx_section { margin-bottom: 1.5rem; }
+.arxiv-content .ltx_p { margin-bottom: 0.75rem; }
+.arxiv-content .ltx_para { margin-bottom: 0.5rem; }
 
-.arxiv-content figure {
+/* Figures */
+.arxiv-content .ltx_figure, .arxiv-content figure {
   margin: 1.5rem 0;
   text-align: center;
 }
-
-.arxiv-content figcaption, .arxiv-content .ltx_caption {
+.arxiv-content .ltx_caption, .arxiv-content figcaption {
   font-size: 0.85rem;
   color: var(--muted);
   margin-top: 0.5rem;
+  text-align: center;
 }
 
-.arxiv-content a {
+/* Math */
+.arxiv-content .ltx_equation {
+  margin: 1rem 0;
+  overflow-x: auto;
+  text-align: center;
+}
+.arxiv-content .ltx_Math { font-style: italic; }
+
+/* Lists */
+.arxiv-content .ltx_itemize, .arxiv-content .ltx_enumerate {
+  padding-left: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.arxiv-content .ltx_item { margin-bottom: 0.25rem; }
+
+/* Citations & refs */
+.arxiv-content .ltx_cite, .arxiv-content .ltx_ref {
   color: var(--accent);
-  text-decoration: none;
+}
+.arxiv-content .ltx_bibliography {
+  font-size: 0.85rem;
+  margin-top: 2rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+.arxiv-content .ltx_bibitem { margin-bottom: 0.5rem; }
+
+/* Abstract */
+.arxiv-content .ltx_abstract {
+  background: var(--accent-light);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
 }
 
-.arxiv-content a:hover {
-  text-decoration: underline;
+/* Links */
+.arxiv-content a { color: var(--accent); text-decoration: none; }
+.arxiv-content a:hover { text-decoration: underline; }
+
+/* Theorem-like environments */
+.arxiv-content .ltx_theorem {
+  border-left: 3px solid var(--accent);
+  padding-left: 1rem;
+  margin: 1rem 0;
 }
+.arxiv-content .ltx_title_theorem { font-weight: 700; }

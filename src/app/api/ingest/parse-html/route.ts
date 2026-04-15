@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     }
 
     const html = await fetchArxivHtml(arxivId);
-    const { chunks, articleHtml } = extractTextChunks(html);
+    const { chunks, articleHtml } = extractTextChunks(html, arxivId);
     const groups = groupChunksForTranslation(chunks);
 
     const slug = arxivId.replace('.', '-');

@@ -36,15 +36,41 @@ export async function fetchArxivHtml(arxivId: string): Promise<string> {
  * Extract translatable text segments from arxiv HTML.
  * Returns chunks with path identifiers so we can put translations back.
  */
-export function extractTextChunks(html: string): { chunks: HtmlChunk[]; articleHtml: string } {
+export function extractTextChunks(html: string, arxivId: string): { chunks: HtmlChunk[]; articleHtml: string } {
   const $ = cheerio.load(html);
 
-  // Remove scripts, styles, nav, header, footer
-  $('script, style, nav, header, footer, .ltx_page_header, .ltx_page_footer').remove();
+  // Remove scripts, nav, header, footer (keep styles)
+  $('script, nav, header, footer, .ltx_page_header, .ltx_page_footer').remove();
+
+  // Fix relative image/resource URLs to point to arxiv
+  const baseUrl = `https://arxiv.org/html/${arxivId}/`;
+  $('img').each((_, el) => {
+    const src = $(el).attr('src');
+    if (src && !src.startsWith('http') && !src.startsWith('data:')) {
+      $(el).attr('src', baseUrl + src);
+    }
+  });
+  $('link[rel="stylesheet"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (href && !href.startsWith('http')) {
+      $(el).attr('href', baseUrl + href);
+    }
+  });
+
+  // Extract inline styles from arxiv's CSS
+  const styles: string[] = [];
+  $('style').each((_, el) => {
+    styles.push($(el).html() || '');
+  });
 
   // Get the article content
   const article = $('.ltx_document, .ltx_page_content, article, main').first();
-  const articleHtml = article.length ? article.html() || '' : $('body').html() || '';
+  let articleHtml = article.length ? article.html() || '' : $('body').html() || '';
+
+  // Prepend styles so they work when embedded
+  if (styles.length > 0) {
+    articleHtml = `<style>${styles.join('\n')}</style>` + articleHtml;
+  }
 
   const chunks: HtmlChunk[] = [];
   let chunkId = 0;
