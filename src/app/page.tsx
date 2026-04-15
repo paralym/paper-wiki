@@ -3,6 +3,15 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+async function safeJson(res: Response) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
+  }
+}
+
 interface Chunk {
   index: number;
   text: string;
@@ -114,7 +123,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
-      const startData = await startRes.json();
+      const startData = await safeJson(startRes);
       if (!startRes.ok) throw new Error(startData.error);
       const { meta } = startData;
 
@@ -125,7 +134,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ arxivId: meta.arxivId }),
       });
-      const parseData = await parseRes.json();
+      const parseData = await safeJson(parseRes);
       if (!parseRes.ok) throw new Error(parseData.error);
 
       // Step 1.6: Split into sections (client-side, instant)
@@ -163,7 +172,7 @@ export default function Home() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: chunks[idx].text }),
           });
-          const trData = await trRes.json();
+          const trData = await safeJson(trRes);
           if (!trRes.ok) throw new Error(trData.error);
           return { idx, translated: trData.translated };
         });
@@ -186,7 +195,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ meta, translatedTex: translatedParts.join("") }),
       });
-      const finishData = await finishRes.json();
+      const finishData = await safeJson(finishRes);
       if (!finishRes.ok) throw new Error(finishData.error);
 
       setStatus(`完成: ${finishData.title}`);
