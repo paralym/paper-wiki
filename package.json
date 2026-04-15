@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.53",
     "@anthropic-ai/sdk": "^0.89.0",
+    "ai": "^6.0.161",
     "cheerio": "^1.2.0",
     "gray-matter": "^4.0.3",
     "katex": "^0.16.45",
@@ -27,7 +29,8 @@
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.2",
     "tar": "^7.5.13",
-    "unified": "^11.0.5"
+    "unified": "^11.0.5",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

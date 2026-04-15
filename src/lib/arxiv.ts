@@ -57,7 +57,11 @@ export async function fetchArxivMeta(arxivId: string): Promise<ArxivMeta> {
   return { arxivId, title, authors, summary, categories, published };
 }
 
-export async function downloadLatexSource(arxivId: string): Promise<string> {
+/**
+ * Download and extract arXiv source to a temp directory.
+ * Returns { dir, singleFile } — if it's a single .tex file, singleFile has its content.
+ */
+export async function downloadAndExtract(arxivId: string): Promise<{ dir: string; singleFile?: string }> {
   const url = `https://export.arxiv.org/e-print/${arxivId}`;
   const res = await fetch(url, {
     headers: { 'Accept': '*/*' },
@@ -70,7 +74,6 @@ export async function downloadLatexSource(arxivId: string): Promise<string> {
   const buffer = Buffer.from(await res.arrayBuffer());
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'arxiv-'));
 
-  // Try extracting as tar.gz first
   try {
     const tarPath = path.join(tmpDir, 'source.tar');
     const decompressed = await new Promise<Buffer>((resolve, reject) => {
@@ -82,13 +85,11 @@ export async function downloadLatexSource(arxivId: string): Promise<string> {
       Readable.from(buffer).pipe(gunzip);
     });
 
-    // Check if decompressed is plain tex (not tar)
     const asText = decompressed.toString('utf-8');
     if (asText.includes('\\begin{document}') || asText.includes('\\documentclass')) {
-      return asText;
+      return { dir: tmpDir, singleFile: asText };
     }
 
-    // It's a tar — extract with tar package
     await fs.writeFile(tarPath, decompressed);
     try {
       await tar.extract({ file: tarPath, cwd: tmpDir });
@@ -96,19 +97,44 @@ export async function downloadLatexSource(arxivId: string): Promise<string> {
       // extraction failed
     }
   } catch {
-    // Not gzipped — might be raw LaTeX
     const raw = buffer.toString('utf-8');
     if (raw.includes('\\begin{document}') || raw.includes('\\documentclass')) {
-      return raw;
+      return { dir: tmpDir, singleFile: raw };
     }
     throw new Error('无法解析下载的文件格式');
   }
 
-  const texContent = await findMainTexFile(tmpDir);
-  return texContent;
+  return { dir: tmpDir };
 }
 
-async function collectTexFiles(dir: string): Promise<string[]> {
+// Keep backward compat
+export async function downloadLatexSource(arxivId: string): Promise<string> {
+  const { dir, singleFile } = await downloadAndExtract(arxivId);
+  if (singleFile) return singleFile;
+  return await legacyFindMainFile(dir);
+}
+
+async function legacyFindMainFile(dir: string): Promise<string> {
+  const texFiles = await collectTexFiles(dir);
+  if (texFiles.length === 0) throw new Error('未找到 .tex 文件');
+  for (const f of texFiles) {
+    if (path.basename(f) === 'main.tex') {
+      const content = await fs.readFile(f, 'utf-8');
+      return await resolveInputs(content, path.dirname(f));
+    }
+  }
+  const contents = await Promise.all(texFiles.map(async f => ({
+    path: f, content: await fs.readFile(f, 'utf-8')
+  })));
+  const withDoc = contents.filter(f => f.content.includes('\\begin{document}'));
+  withDoc.sort((a, b) => b.content.length - a.content.length);
+  if (withDoc.length > 0) {
+    return await resolveInputs(withDoc[0].content, path.dirname(withDoc[0].path));
+  }
+  return contents[0].content;
+}
+
+export async function collectTexFiles(dir: string): Promise<string[]> {
   const texFiles: string[] = [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -123,7 +149,7 @@ async function collectTexFiles(dir: string): Promise<string[]> {
   return texFiles;
 }
 
-async function resolveInputs(content: string, baseDir: string): Promise<string> {
+export async function resolveInputs(content: string, baseDir: string): Promise<string> {
   const inputPattern = /\\(?:input|include)\{([^}]+)\}/g;
   let result = content;
 
@@ -148,73 +174,6 @@ async function resolveInputs(content: string, baseDir: string): Promise<string> 
   }
 
   return result;
-}
-
-async function findMainTexFile(dir: string): Promise<string> {
-  const texFiles = await collectTexFiles(dir);
-
-  if (texFiles.length === 0) {
-    throw new Error('在源码包中未找到 .tex 文件');
-  }
-
-  // Read all files with previews
-  const fileInfos: { path: string; relPath: string; content: string; size: number; preview: string }[] = [];
-  for (const f of texFiles) {
-    const content = await fs.readFile(f, 'utf-8');
-    const relPath = path.relative(dir, f);
-    // First 30 lines as preview
-    const preview = content.split('\n').slice(0, 30).join('\n');
-    fileInfos.push({ path: f, relPath, content, size: content.length, preview });
-  }
-
-  // If only one .tex file with \begin{document}, use it directly
-  const withDoc = fileInfos.filter(f => f.content.includes('\\begin{document}'));
-  if (withDoc.length === 1) {
-    return await resolveInputs(withDoc[0].content, path.dirname(withDoc[0].path));
-  }
-
-  // Multiple candidates — ask LLM to pick the main paper file
-  const { getClient } = await import('./translate');
-  const MODEL = 'gemini-3-flash-preview';
-
-  const fileSummary = fileInfos.map(f =>
-    `=== ${f.relPath} (${f.size} chars) ===\n${f.preview}\n`
-  ).join('\n');
-
-  const response = await getClient().chat.completions.create({
-    model: MODEL,
-    max_tokens: 256,
-    messages: [{
-      role: 'user',
-      content: `Below are .tex files from an arXiv paper source package. Each shows the filename and first 30 lines.
-
-Which file is the MAIN paper file (the root file that should be compiled, NOT a conference template/formatting guide)?
-
-${fileSummary}
-
-Reply with ONLY the filename (e.g. "main.tex" or "paper.tex"), nothing else.`,
-    }],
-  });
-
-  const chosen = response.choices[0]?.message?.content?.trim() || '';
-
-  // Find the chosen file
-  const selected = fileInfos.find(f =>
-    f.relPath === chosen || path.basename(f.relPath) === chosen
-  );
-
-  if (selected) {
-    return await resolveInputs(selected.content, path.dirname(selected.path));
-  }
-
-  // Fallback: largest file with \begin{document}
-  if (withDoc.length > 0) {
-    withDoc.sort((a, b) => b.size - a.size);
-    return await resolveInputs(withDoc[0].content, path.dirname(withDoc[0].path));
-  }
-
-  fileInfos.sort((a, b) => b.size - a.size);
-  return await resolveInputs(fileInfos[0].content, path.dirname(fileInfos[0].path));
 }
 
 export interface TexChunk {
