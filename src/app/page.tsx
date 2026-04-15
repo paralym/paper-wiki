@@ -3,6 +3,65 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 
+interface Chunk {
+  index: number;
+  text: string;
+  translatable: boolean;
+}
+
+function splitTexIntoChunks(tex: string): Chunk[] {
+  const chunks: Chunk[] = [];
+  const MAX_CHUNK = 12000;
+
+  const docBegin = tex.indexOf('\\begin{document}');
+  const docEnd = tex.indexOf('\\end{document}');
+
+  if (docBegin === -1) {
+    chunks.push({ index: 0, text: tex, translatable: true });
+    return chunks;
+  }
+
+  // Preamble
+  chunks.push({
+    index: chunks.length,
+    text: tex.slice(0, docBegin + '\\begin{document}'.length),
+    translatable: false,
+  });
+
+  const body = tex.slice(docBegin + '\\begin{document}'.length, docEnd >= 0 ? docEnd : undefined);
+
+  // Split by \section
+  const sections = body.split(/(?=\\(?:section|chapter)\*?\{)/);
+
+  for (const section of sections) {
+    if (!section.trim()) continue;
+    if (section.length <= MAX_CHUNK) {
+      chunks.push({ index: chunks.length, text: section, translatable: true });
+    } else {
+      // Split oversized section at paragraph boundaries
+      const paragraphs = section.split(/(\n\s*\n)/);
+      let batch = '';
+      for (const p of paragraphs) {
+        if (batch.length + p.length > MAX_CHUNK && batch.trim()) {
+          chunks.push({ index: chunks.length, text: batch, translatable: true });
+          batch = p;
+        } else {
+          batch += p;
+        }
+      }
+      if (batch.trim()) {
+        chunks.push({ index: chunks.length, text: batch, translatable: true });
+      }
+    }
+  }
+
+  if (docEnd >= 0) {
+    chunks.push({ index: chunks.length, text: tex.slice(docEnd), translatable: false });
+  }
+
+  return chunks;
+}
+
 interface Paper {
   slug: string;
   data: {
@@ -59,8 +118,8 @@ export default function Home() {
       if (!startRes.ok) throw new Error(startData.error);
       const { meta } = startData;
 
-      // Step 1.5: Download and parse LaTeX source
-      setStatus("正在下载并解析 LaTeX 源码...");
+      // Step 1.5: Download LaTeX source
+      setStatus("正在下载 LaTeX 源码...");
       const parseRes = await fetch("/api/ingest/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -69,8 +128,11 @@ export default function Home() {
       const parseData = await parseRes.json();
       if (!parseRes.ok) throw new Error(parseData.error);
 
-      const { chunks } = parseData;
-      const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
+      // Step 1.6: Split into sections (client-side, instant)
+      setStatus("正在解析文档结构...");
+      const tex = parseData.tex;
+      const chunks = splitTexIntoChunks(tex);
+      const translatableChunks = chunks.filter((c) => c.translatable);
       setProgress({ current: 0, total: translatableChunks.length });
 
       // Step 2: Translate chunks in parallel (concurrency = 4)

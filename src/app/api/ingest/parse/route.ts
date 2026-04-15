@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { downloadLatexSource, parseTexForTranslation } from '@/lib/arxiv';
+import { downloadLatexSource } from '@/lib/arxiv';
 
+// Step: download LaTeX source and return raw tex content
 export async function POST(request: Request) {
   try {
     const { arxivId } = await request.json();
@@ -9,38 +10,9 @@ export async function POST(request: Request) {
     }
 
     const texSource = await downloadLatexSource(arxivId);
-    const sections = parseTexForTranslation(texSource);
-
-    const MAX_CHUNK = 12000;
-    const chunks: { index: number; text: string; translatable: boolean }[] = [];
-
-    for (const s of sections) {
-      if (!s.translatable || s.content.length <= MAX_CHUNK) {
-        chunks.push({ index: chunks.length, text: s.content, translatable: s.translatable });
-      } else {
-        const paragraphs = s.content.split(/(\n\s*\n)/);
-        let batch = '';
-        for (const p of paragraphs) {
-          if (batch.length + p.length > MAX_CHUNK && batch.trim()) {
-            chunks.push({ index: chunks.length, text: batch, translatable: true });
-            batch = p;
-          } else {
-            batch += p;
-          }
-        }
-        if (batch.trim()) {
-          chunks.push({ index: chunks.length, text: batch, translatable: true });
-        }
-      }
-    }
-
-    return NextResponse.json({
-      chunks,
-      totalChunks: chunks.length,
-      translatableChunks: chunks.filter((c) => c.translatable).length,
-    });
+    return NextResponse.json({ tex: texSource });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '未知错误';
+    const message = error instanceof Error ? error.message : '下载失败';
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
