@@ -23,7 +23,7 @@ export async function savePaper(
     summary: knowledge.summary,
   };
 
-  const markdownContent = texToMarkdown(translatedTex);
+  const markdownContent = cleanMarkdown(translatedTex);
   const content = matter.stringify(markdownContent, frontmatter);
 
   const existing = await getFile(filePath);
@@ -32,51 +32,26 @@ export async function savePaper(
   return slug;
 }
 
-function texToMarkdown(tex: string): string {
-  let md = tex;
+function cleanMarkdown(md: string): string {
+  // LLM already outputs Markdown, just clean up residual LaTeX if any
+  let out = md;
 
-  const docBegin = md.indexOf('\\begin{document}');
-  if (docBegin !== -1) {
-    md = md.slice(docBegin + '\\begin{document}'.length);
-  }
-  const docEnd = md.indexOf('\\end{document}');
-  if (docEnd !== -1) {
-    md = md.slice(0, docEnd);
-  }
+  // Remove any remaining document environment markers
+  out = out.replace(/\\begin\{document\}/g, '');
+  out = out.replace(/\\end\{document\}/g, '');
 
-  md = md.replace(/\\section\*?\{(.*?)\}/g, '\n## $1\n');
-  md = md.replace(/\\subsection\*?\{(.*?)\}/g, '\n### $1\n');
-  md = md.replace(/\\subsubsection\*?\{(.*?)\}/g, '\n#### $1\n');
+  // Clean up any leftover simple LaTeX commands the LLM missed
+  out = out.replace(/\\maketitle/g, '');
+  out = out.replace(/\\tableofcontents/g, '');
+  out = out.replace(/\\newpage/g, '');
+  out = out.replace(/\\noindent\s*/g, '');
+  out = out.replace(/\\label\{[^}]*\}/g, '');
 
-  md = md.replace(/\\textbf\{(.*?)\}/g, '**$1**');
-  md = md.replace(/\\textit\{(.*?)\}/g, '*$1*');
-  md = md.replace(/\\emph\{(.*?)\}/g, '*$1*');
-  md = md.replace(/\\underline\{(.*?)\}/g, '<u>$1</u>');
+  // Normalize spacing
+  out = out.replace(/\n{3,}/g, '\n\n');
+  out = out.trim();
 
-  md = md.replace(/\\begin\{itemize\}/g, '');
-  md = md.replace(/\\end\{itemize\}/g, '');
-  md = md.replace(/\\begin\{enumerate\}/g, '');
-  md = md.replace(/\\end\{enumerate\}/g, '');
-  md = md.replace(/\\item\s*/g, '- ');
-
-  md = md.replace(/\\begin\{abstract\}/g, '\n## 摘要\n');
-  md = md.replace(/\\end\{abstract\}/g, '\n');
-
-  md = md.replace(/\\\[([\s\S]*?)\\\]/g, '\n$$\n$1\n$$\n');
-
-  md = md.replace(/\\maketitle/g, '');
-  md = md.replace(/\\tableofcontents/g, '');
-  md = md.replace(/\\newpage/g, '');
-  md = md.replace(/\\noindent/g, '');
-  md = md.replace(/\\\\(\s*\n)/g, '\n');
-
-  md = md.replace(/\\cite[pt]?\{(.*?)\}/g, '[$1]');
-  md = md.replace(/\\footnote\{(.*?)\}/g, ' ($1)');
-
-  md = md.replace(/\n{3,}/g, '\n\n');
-  md = md.trim();
-
-  return md;
+  return out;
 }
 
 export async function updateConceptPage(

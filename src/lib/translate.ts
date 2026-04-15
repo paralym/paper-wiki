@@ -11,16 +11,20 @@ function getClient() {
 
 const MODEL = 'gemini-3-flash-preview';
 
-const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任务是将英文 LaTeX 论文内容翻译为中文。
+const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任务是将英文 LaTeX 论文内容翻译为中文，并输出为 Markdown 格式。
 
-规则：
-1. 只翻译自然语言文本，保留所有 LaTeX 命令和结构不变
-2. 保留所有数学公式（$...$, $$...$$, \\[...\\] 等）不翻译
-3. 保留 \\section, \\subsection 等命令，只翻译其参数中的文本
-4. 保留 \\cite, \\ref, \\label 等引用命令不翻译
-5. 严格按照术语表翻译专业术语，确保全文一致
-6. 保持学术论文的正式语气
-7. 直接输出翻译后的 LaTeX 内容，不要添加任何解释`;
+转换规则：
+1. 翻译所有自然语言文本为中文
+2. 数学公式转为 Markdown 兼容格式：行内公式用 $...$，行间公式用 $$...$$
+3. \\section{X} → ## X，\\subsection{X} → ### X，\\subsubsection{X} → #### X
+4. \\textbf{X} → **X**，\\textit{X}/\\emph{X} → *X*
+5. \\begin{itemize}/enumerate 转为 Markdown 列表（- 或 1.）
+6. \\begin{abstract}...\\end{abstract} → ## 摘要 + 内容
+7. \\cite{X} → [X]，\\ref{X} → [X]
+8. 去掉 \\maketitle, \\label{}, \\noindent, \\newpage 等无关命令
+9. figure/table 环境：保留 caption 文本翻译，其余去掉
+10. 保持学术论文的正式语气
+11. 直接输出 Markdown 内容，不要用代码块包裹，不要添加任何解释`;
 
 export async function extractGlossary(abstractAndIntro: string): Promise<Record<string, string>> {
   const response = await getClient().chat.completions.create({
