@@ -48,8 +48,8 @@ export default function Home() {
     setProgress({ current: 0, total: 0 });
 
     try {
-      // Step 1: Download and parse LaTeX
-      setStatus("正在下载 LaTeX 源码...");
+      // Step 1: Get metadata
+      setStatus("正在获取论文信息...");
       const startRes = await fetch("/api/ingest/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,8 +57,19 @@ export default function Home() {
       });
       const startData = await startRes.json();
       if (!startRes.ok) throw new Error(startData.error);
+      const { meta } = startData;
 
-      const { meta, chunks } = startData;
+      // Step 1.5: Download and parse LaTeX source
+      setStatus("正在下载并解析 LaTeX 源码...");
+      const parseRes = await fetch("/api/ingest/parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arxivId: meta.arxivId }),
+      });
+      const parseData = await parseRes.json();
+      if (!parseRes.ok) throw new Error(parseData.error);
+
+      const { chunks } = parseData;
       const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
       setProgress({ current: 0, total: translatableChunks.length });
 
