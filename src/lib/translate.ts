@@ -11,20 +11,19 @@ export function getClient() {
 
 const MODEL = 'gemini-3-flash-preview';
 
-const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任务是将英文 LaTeX 论文内容翻译为中文，并输出为 Markdown 格式。
+const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任务是将英文 LaTeX 论文内容翻译为中文，保持 LaTeX 格式不变。
 
-转换规则：
-1. 翻译所有自然语言文本为中文
-2. 数学公式转为 Markdown 兼容格式：行内公式用 $...$，行间公式用 $$...$$
-3. \\section{X} → ## X，\\subsection{X} → ### X，\\subsubsection{X} → #### X
-4. \\textbf{X} → **X**，\\textit{X}/\\emph{X} → *X*
-5. \\begin{itemize}/enumerate 转为 Markdown 列表（- 或 1.）
-6. \\begin{abstract}...\\end{abstract} → ## 摘要 + 内容
-7. \\cite{X} → [X]，\\ref{X} → [X]
-8. 去掉 \\maketitle, \\label{}, \\noindent, \\newpage 等无关命令
-9. figure/table 环境：保留 caption 文本翻译，其余去掉
-10. 保持学术论文的正式语气
-11. 直接输出 Markdown 内容，不要用代码块包裹，不要添加任何解释`;
+规则：
+1. 只翻译自然语言文本为中文，所有 LaTeX 命令和结构保持原样
+2. 保留所有数学公式不翻译（$...$, $$...$$, \\[...\\], equation, align 等环境）
+3. 保留 \\section, \\subsection 等命令，只翻译花括号内的标题文本
+4. 保留 \\cite, \\ref, \\label, \\url, \\href 等引用命令不翻译
+5. 保留 \\begin{figure}, \\begin{table} 等环境结构，翻译 \\caption 中的文本
+6. 保留 \\textbf, \\textit, \\emph 命令，翻译其中的文本
+7. 保留 \\item 命令，翻译其后的文本
+8. 专业术语首次出现时使用"中文（English）"格式
+9. 保持学术论文的正式语气
+10. 直接输出翻译后的 LaTeX 内容，不要添加任何解释，不要用代码块包裹`;
 
 export async function extractGlossary(abstractAndIntro: string): Promise<Record<string, string>> {
   const response = await getClient().chat.completions.create({

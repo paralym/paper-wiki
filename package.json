@@ -16,6 +16,7 @@
     "cheerio": "^1.2.0",
     "gray-matter": "^4.0.3",
     "katex": "^0.16.45",
+    "latex.js": "^0.12.6",
     "lucide-react": "^1.8.0",
     "next": "16.2.3",
     "openai": "^6.34.0",

@@ -9,8 +9,6 @@ export async function savePaper(
 ): Promise<string> {
   const slug = meta.arxivId.replace('.', '-');
 
-  const markdownContent = cleanMarkdown(translatedTex);
-
   const { error } = await supabase.from('papers').upsert({
     slug,
     arxiv_id: meta.arxivId,
@@ -22,8 +20,8 @@ export async function savePaper(
     concepts: knowledge.concepts.map(c => c.name),
     entities: knowledge.entities.map(e => e.name),
     summary: knowledge.summary,
-    mode: 'markdown',
-    content: markdownContent,
+    mode: 'latex',
+    content: translatedTex,
   }, { onConflict: 'slug' });
 
   if (error) throw new Error(`保存论文失败: ${error.message}`);

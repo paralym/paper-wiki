@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getPaperContent } from '@/lib/wiki';
-import { renderMarkdown } from '@/lib/markdown';
 
 export async function GET(
   request: Request,
@@ -9,10 +8,9 @@ export async function GET(
   try {
     const { slug } = await params;
     const result = await getPaperContent(slug);
-    const html = await renderMarkdown(result.content || '');
     return NextResponse.json({
       data: result.data,
-      html,
+      content: result.content,
     });
   } catch {
     return NextResponse.json({ error: '论文未找到' }, { status: 404 });
