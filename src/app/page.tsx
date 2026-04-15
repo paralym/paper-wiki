@@ -127,8 +127,8 @@ export default function Home() {
       if (!startRes.ok) throw new Error(startData.error);
       const { meta } = startData;
 
-      // Step 1.5: Download LaTeX source
-      setStatus("正在下载 LaTeX 源码...");
+      // Step 1.5: Download and parse LaTeX source
+      setStatus("正在下载并解析 LaTeX 源码...");
       const parseRes = await fetch("/api/ingest/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -137,11 +137,8 @@ export default function Home() {
       const parseData = await safeJson(parseRes);
       if (!parseRes.ok) throw new Error(parseData.error);
 
-      // Step 1.6: Split into sections (client-side, instant)
-      setStatus("正在解析文档结构...");
-      const tex = parseData.tex;
-      const chunks = splitTexIntoChunks(tex);
-      const translatableChunks = chunks.filter((c) => c.translatable);
+      const { chunks } = parseData;
+      const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
       setProgress({ current: 0, total: translatableChunks.length });
 
       // Step 2: Translate chunks in parallel (concurrency = 4)
