@@ -72,7 +72,7 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
   const isHtmlMode = paper.mode === 'html';
 
   return (
-    <article className={isHtmlMode && viewMode === 'side-by-side' ? 'max-w-7xl mx-auto' : 'max-w-4xl mx-auto'}>
+    <article className={isHtmlMode && viewMode === 'side-by-side' ? 'w-full' : 'max-w-4xl mx-auto'}>
       {/* Header */}
       <header className="mb-6">
         <h1 className="text-2xl font-bold mb-2">{data.title}</h1>
@@ -131,30 +131,34 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
 
       {/* Content */}
       {isHtmlMode ? (
-        <div className={viewMode === 'side-by-side' ? 'grid grid-cols-2 gap-4' : ''}>
-          {(viewMode === 'original' || viewMode === 'side-by-side') && (
-            <div className="border border-border rounded-lg p-6 overflow-auto">
-              {viewMode === 'side-by-side' && (
-                <div className="text-xs text-muted mb-3 font-medium uppercase tracking-wide">原文 Original</div>
-              )}
-              <div
-                className="arxiv-content"
-                dangerouslySetInnerHTML={{ __html: paper.originalHtml || '' }}
-              />
-            </div>
-          )}
-          {(viewMode === 'translated' || viewMode === 'side-by-side') && (
-            <div className="border border-border rounded-lg p-6 overflow-auto">
-              {viewMode === 'side-by-side' && (
-                <div className="text-xs text-muted mb-3 font-medium uppercase tracking-wide">译文 Translation</div>
-              )}
-              <div
-                className="arxiv-content"
-                dangerouslySetInnerHTML={{ __html: paper.translatedHtml || '' }}
-              />
-            </div>
-          )}
-        </div>
+        <>
+          {/* Load arxiv LaTeXML CSS */}
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/niclasberg/ar5iv-css@main/ar5iv.min.css" />
+          <div className={viewMode === 'side-by-side' ? 'grid grid-cols-2 gap-6' : ''}>
+            {(viewMode === 'original' || viewMode === 'side-by-side') && (
+              <div className="border border-border rounded-lg p-6 overflow-auto max-h-[85vh] overflow-y-auto">
+                {viewMode === 'side-by-side' && (
+                  <div className="text-xs text-muted mb-3 font-medium uppercase tracking-wide sticky top-0 bg-surface py-1">原文 Original</div>
+                )}
+                <div
+                  className="arxiv-content"
+                  dangerouslySetInnerHTML={{ __html: paper.originalHtml || '' }}
+                />
+              </div>
+            )}
+            {(viewMode === 'translated' || viewMode === 'side-by-side') && (
+              <div className="border border-border rounded-lg p-6 overflow-auto max-h-[85vh] overflow-y-auto">
+                {viewMode === 'side-by-side' && (
+                  <div className="text-xs text-muted mb-3 font-medium uppercase tracking-wide sticky top-0 bg-surface py-1">译文 Translation</div>
+                )}
+                <div
+                  className="arxiv-content"
+                  dangerouslySetInnerHTML={{ __html: paper.translatedHtml || '' }}
+                />
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         <div
           className="paper-content"

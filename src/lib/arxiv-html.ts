@@ -42,18 +42,22 @@ export function extractTextChunks(html: string, arxivId: string): { chunks: Html
   // Remove scripts, nav, header, footer (keep styles)
   $('script, nav, header, footer, .ltx_page_header, .ltx_page_footer').remove();
 
-  // Fix relative image/resource URLs to point to arxiv
+  // Fix ALL relative URLs to point to arxiv
   const baseUrl = `https://arxiv.org/html/${arxivId}/`;
-  $('img').each((_, el) => {
-    const src = $(el).attr('src');
-    if (src && !src.startsWith('http') && !src.startsWith('data:')) {
-      $(el).attr('src', baseUrl + src);
-    }
-  });
-  $('link[rel="stylesheet"]').each((_, el) => {
-    const href = $(el).attr('href');
-    if (href && !href.startsWith('http')) {
-      $(el).attr('href', baseUrl + href);
+  const fixUrl = (url: string | undefined) => {
+    if (!url || url.startsWith('http') || url.startsWith('data:') || url.startsWith('#')) return url;
+    return baseUrl + url;
+  };
+
+  $('img').each((_, el) => { $(el).attr('src', fixUrl($(el).attr('src')) || ''); });
+  $('source').each((_, el) => { $(el).attr('srcset', fixUrl($(el).attr('srcset')) || ''); });
+  $('object').each((_, el) => { $(el).attr('data', fixUrl($(el).attr('data')) || ''); });
+  $('link[rel="stylesheet"]').each((_, el) => { $(el).attr('href', fixUrl($(el).attr('href')) || ''); });
+  $('use').each((_, el) => {
+    const href = $(el).attr('xlink:href') || $(el).attr('href');
+    if (href) {
+      $(el).attr('xlink:href', fixUrl(href) || '');
+      $(el).attr('href', fixUrl(href) || '');
     }
   });
 

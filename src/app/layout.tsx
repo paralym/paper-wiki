@@ -54,7 +54,7 @@ export default function RootLayout({
             </div>
           </nav>
         </header>
-        <main className="flex-1 max-w-5xl mx-auto px-4 py-8 w-full">
+        <main className="flex-1 mx-auto px-4 py-8 w-full max-w-screen-2xl">
           {children}
         </main>
         <footer className="border-t border-border py-4 text-center text-sm text-muted">
