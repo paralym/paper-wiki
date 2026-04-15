@@ -108,32 +108,6 @@ export async function downloadLatexSource(arxivId: string): Promise<string> {
   return texContent;
 }
 
-// Conference template file patterns — these should be skipped
-const TEMPLATE_PATTERNS = [
-  /^(iclr|nips|neurips|icml|acl|aaai|cvpr|eccv|iccv|emnlp|naacl|coling|sigir)/i,
-  /^(template|example|sample|instructions|formatting)/i,
-  /^llncs/i,  // Springer LNCS template
-];
-
-function isTemplateFile(filename: string, content: string): boolean {
-  const base = path.basename(filename, '.tex');
-
-  // Check filename patterns
-  if (TEMPLATE_PATTERNS.some(p => p.test(base))) return true;
-
-  // Check content: templates have formatting instructions, not research content
-  if (content.includes('formatting instructions') ||
-      content.includes('style file') ||
-      content.includes('camera-ready') ||
-      (content.includes('\\usepackage') && !content.includes('\\input{') && !content.includes('\\section{Introduction'))) {
-    // If it looks like pure instructions with no real content sections, it's a template
-    const hasResearchSections = /\\section\{(Introduction|Related|Method|Experiment|Result|Approach|Background)/i.test(content);
-    if (!hasResearchSections) return true;
-  }
-
-  return false;
-}
-
 async function collectTexFiles(dir: string): Promise<string[]> {
   const texFiles: string[] = [];
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -150,13 +124,11 @@ async function collectTexFiles(dir: string): Promise<string[]> {
 }
 
 async function resolveInputs(content: string, baseDir: string): Promise<string> {
-  // Recursively resolve \input{} and \include{} directives
   const inputPattern = /\\(?:input|include)\{([^}]+)\}/g;
   let result = content;
-  let match;
 
-  // Reset regex
   const matches: { full: string; file: string }[] = [];
+  let match;
   while ((match = inputPattern.exec(content)) !== null) {
     matches.push({ full: match[0], file: match[1] });
   }
@@ -168,11 +140,10 @@ async function resolveInputs(content: string, baseDir: string): Promise<string> 
     const fullPath = path.join(baseDir, inputPath);
     try {
       let inputContent = await fs.readFile(fullPath, 'utf-8');
-      // Recursively resolve nested inputs
       inputContent = await resolveInputs(inputContent, path.dirname(fullPath));
       result = result.replace(m.full, inputContent);
     } catch {
-      // File not found, leave the \input{} as-is
+      // File not found, leave as-is
     }
   }
 
@@ -186,48 +157,64 @@ async function findMainTexFile(dir: string): Promise<string> {
     throw new Error('在源码包中未找到 .tex 文件');
   }
 
-  // Read all files
-  const fileContents: { path: string; content: string; size: number }[] = [];
+  // Read all files with previews
+  const fileInfos: { path: string; relPath: string; content: string; size: number; preview: string }[] = [];
   for (const f of texFiles) {
     const content = await fs.readFile(f, 'utf-8');
-    fileContents.push({ path: f, content, size: content.length });
+    const relPath = path.relative(dir, f);
+    // First 30 lines as preview
+    const preview = content.split('\n').slice(0, 30).join('\n');
+    fileInfos.push({ path: f, relPath, content, size: content.length, preview });
   }
 
-  // Filter out template files
-  const candidates = fileContents.filter(f => !isTemplateFile(f.path, f.content));
-  const pool = candidates.length > 0 ? candidates : fileContents;
-
-  // Priority 1: file named main.tex
-  const mainTex = pool.find(f => path.basename(f.path) === 'main.tex');
-  if (mainTex) {
-    return await resolveInputs(mainTex.content, path.dirname(mainTex.path));
-  }
-
-  // Priority 2: file with \begin{document} and \input{} (multi-file project root)
-  const withInputs = pool.filter(f =>
-    f.content.includes('\\begin{document}') && /\\input\{/.test(f.content)
-  );
-  if (withInputs.length > 0) {
-    // Pick the one with the most \input{} directives (likely the root)
-    withInputs.sort((a, b) => {
-      const countA = (a.content.match(/\\input\{/g) || []).length;
-      const countB = (b.content.match(/\\input\{/g) || []).length;
-      return countB - countA;
-    });
-    return await resolveInputs(withInputs[0].content, path.dirname(withInputs[0].path));
-  }
-
-  // Priority 3: largest file with \begin{document}
-  const withDoc = pool
-    .filter(f => f.content.includes('\\begin{document}'))
-    .sort((a, b) => b.size - a.size);
-  if (withDoc.length > 0) {
+  // If only one .tex file with \begin{document}, use it directly
+  const withDoc = fileInfos.filter(f => f.content.includes('\\begin{document}'));
+  if (withDoc.length === 1) {
     return await resolveInputs(withDoc[0].content, path.dirname(withDoc[0].path));
   }
 
-  // Priority 4: largest file overall
-  pool.sort((a, b) => b.size - a.size);
-  return await resolveInputs(pool[0].content, path.dirname(pool[0].path));
+  // Multiple candidates — ask LLM to pick the main paper file
+  const { getClient } = await import('./translate');
+  const MODEL = 'gemini-3-flash-preview';
+
+  const fileSummary = fileInfos.map(f =>
+    `=== ${f.relPath} (${f.size} chars) ===\n${f.preview}\n`
+  ).join('\n');
+
+  const response = await getClient().chat.completions.create({
+    model: MODEL,
+    max_tokens: 256,
+    messages: [{
+      role: 'user',
+      content: `Below are .tex files from an arXiv paper source package. Each shows the filename and first 30 lines.
+
+Which file is the MAIN paper file (the root file that should be compiled, NOT a conference template/formatting guide)?
+
+${fileSummary}
+
+Reply with ONLY the filename (e.g. "main.tex" or "paper.tex"), nothing else.`,
+    }],
+  });
+
+  const chosen = response.choices[0]?.message?.content?.trim() || '';
+
+  // Find the chosen file
+  const selected = fileInfos.find(f =>
+    f.relPath === chosen || path.basename(f.relPath) === chosen
+  );
+
+  if (selected) {
+    return await resolveInputs(selected.content, path.dirname(selected.path));
+  }
+
+  // Fallback: largest file with \begin{document}
+  if (withDoc.length > 0) {
+    withDoc.sort((a, b) => b.size - a.size);
+    return await resolveInputs(withDoc[0].content, path.dirname(withDoc[0].path));
+  }
+
+  fileInfos.sort((a, b) => b.size - a.size);
+  return await resolveInputs(fileInfos[0].content, path.dirname(fileInfos[0].path));
 }
 
 export interface TexChunk {

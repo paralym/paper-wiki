@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { TexChunk } from './arxiv';
 
-function getClient() {
+export function getClient() {
   const base = process.env.OPENAI_BASE_URL || '';
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
