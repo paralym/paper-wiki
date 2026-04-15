@@ -187,33 +187,17 @@ export function parseTexForTranslation(tex: string): TexChunk[] {
 
   const body = tex.slice(docBegin + '\\begin{document}'.length, docEnd >= 0 ? docEnd : undefined);
 
-  // Split body by paragraphs (double newline) and section commands
-  // This preserves the original document structure
-  const paragraphs = body.split(/(\n\s*\n)/);
+  // Split by \section (keeps each section as one big chunk for better context)
+  // Pattern: split at \section but keep the delimiter
+  const sectionPattern = /(?=\\(?:section|chapter)\*?\{)/;
+  const sections = body.split(sectionPattern);
 
-  for (const para of paragraphs) {
-    if (!para.trim()) {
-      // Whitespace/blank lines — preserve as-is
-      chunks.push({ content: para, translatable: false });
-      continue;
-    }
+  for (const section of sections) {
+    if (!section.trim()) continue;
 
-    // Check if this paragraph is entirely a non-translatable environment
-    const envMatch = para.trim().match(/^\\begin\{(\w+\*?)\}[\s\S]*\\end\{\1\}$/);
-    if (envMatch && SKIP_ENVS.has(envMatch[1])) {
-      chunks.push({ content: para, translatable: false });
-      continue;
-    }
-
-    // Check if it's pure display math \[...\]
-    if (/^\s*\\\[[\s\S]*\\\]\s*$/.test(para)) {
-      chunks.push({ content: para, translatable: false });
-      continue;
-    }
-
-    // Otherwise it's a translatable paragraph (may contain inline math — that's fine,
-    // the LLM knows to preserve $...$ and \cite{} etc.)
-    chunks.push({ content: para, translatable: true });
+    // The whole section is one translatable chunk (including its inline math,
+    // figures, equations — the LLM prompt tells it to preserve those)
+    chunks.push({ content: section, translatable: true });
   }
 
   if (docEnd >= 0) {

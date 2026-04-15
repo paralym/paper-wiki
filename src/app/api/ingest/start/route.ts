@@ -11,33 +11,32 @@ export async function POST(request: Request) {
     const arxivId = parseArxivId(url);
     const meta = await fetchArxivMeta(arxivId);
     const texSource = await downloadLatexSource(arxivId);
-    const paragraphs = parseTexForTranslation(texSource);
+    const sections = parseTexForTranslation(texSource);
 
-    // Merge consecutive short translatable paragraphs to reduce API calls,
-    // but never break a paragraph — keep natural boundaries
-    const MAX_CHUNK = 6000;
+    // Each section is already a natural chunk.
+    // Only split if a single section exceeds 12000 chars (very rare).
+    const MAX_CHUNK = 12000;
     const chunks: { index: number; text: string; translatable: boolean }[] = [];
-    let batch = '';
 
-    for (const p of paragraphs) {
-      if (!p.translatable) {
-        if (batch) {
-          chunks.push({ index: chunks.length, text: batch, translatable: true });
-          batch = '';
-        }
-        chunks.push({ index: chunks.length, text: p.content, translatable: false });
+    for (const s of sections) {
+      if (!s.translatable || s.content.length <= MAX_CHUNK) {
+        chunks.push({ index: chunks.length, text: s.content, translatable: s.translatable });
       } else {
-        // Merge short paragraphs, but split at paragraph boundary if too long
-        if (batch && batch.length + p.content.length > MAX_CHUNK) {
+        // Split oversized section at paragraph boundaries
+        const paragraphs = s.content.split(/(\n\s*\n)/);
+        let batch = '';
+        for (const p of paragraphs) {
+          if (batch.length + p.length > MAX_CHUNK && batch.trim()) {
+            chunks.push({ index: chunks.length, text: batch, translatable: true });
+            batch = p;
+          } else {
+            batch += p;
+          }
+        }
+        if (batch.trim()) {
           chunks.push({ index: chunks.length, text: batch, translatable: true });
-          batch = p.content;
-        } else {
-          batch += p.content;
         }
       }
-    }
-    if (batch) {
-      chunks.push({ index: chunks.length, text: batch, translatable: true });
     }
 
     return NextResponse.json({
