@@ -14,8 +14,8 @@ export async function GET(
       return NextResponse.json({
         data: result.data,
         mode: 'html',
-        originalHtml: result.data.originalHtml,
-        translatedHtml: result.data.translatedHtml,
+        originalHtml: result.data.original_html,
+        translatedHtml: result.data.translated_html,
       });
     }
 

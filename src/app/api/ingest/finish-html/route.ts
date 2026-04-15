@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { buildBilingualHtml } from '@/lib/arxiv-html';
 import { ArxivMeta } from '@/lib/arxiv';
 import { extractKnowledge } from '@/lib/translate';
-import { getFile, putFile } from '@/lib/github';
-import { updateConceptPage, updateEntityPage, updateIndex, appendLog } from '@/lib/wiki';
+import { savePaperHtml, updateConceptPage, updateEntityPage, appendLog } from '@/lib/wiki';
+import { supabase } from '@/lib/supabase';
 
 export async function POST(request: Request) {
   try {
@@ -18,54 +18,35 @@ export async function POST(request: Request) {
 
     const slug = meta.arxivId.replace('.', '-');
 
-    // Load cached HTML
-    const cachePath = `wiki/sources/${slug}-html.txt`;
-    const cached = await getFile(cachePath);
+    // Load cached HTML from Supabase
+    const { data: cached } = await supabase
+      .from('html_cache')
+      .select('html')
+      .eq('slug', slug)
+      .single();
+
     if (!cached) {
       return NextResponse.json({ error: '未找到缓存的 HTML' }, { status: 404 });
     }
 
-    // Build translation map
     const translationMap = new Map<string, string>();
     for (const t of translations) {
       translationMap.set(t.id, t.text);
     }
 
-    // Build bilingual HTML
-    const { originalHtml, translatedHtml } = buildBilingualHtml(cached.content, translationMap);
+    const { originalHtml, translatedHtml } = buildBilingualHtml(cached.html, translationMap);
 
-    // Extract knowledge from translated text
     const allTranslatedText = translations.map(t => t.text).join('\n');
     const knowledge = await extractKnowledge(meta.title, meta.summary, allTranslatedText);
 
-    // Save paper as JSON with both HTML versions
-    const paperData = {
-      title: knowledge.titleCn || meta.title,
-      title_en: meta.title,
-      arxiv_id: meta.arxivId,
-      authors: meta.authors,
-      date: meta.published,
-      categories: meta.categories,
-      concepts: knowledge.concepts.map(c => c.name),
-      entities: knowledge.entities.map(e => e.name),
-      summary: knowledge.summary,
-      mode: 'html',
-      originalHtml,
-      translatedHtml,
-    };
+    await savePaperHtml(meta, knowledge, originalHtml, translatedHtml);
 
-    const paperPath = `wiki/papers/${slug}.json`;
-    const existingPaper = await getFile(paperPath);
-    await putFile(paperPath, JSON.stringify(paperData, null, 2), `add paper: ${meta.arxivId}`, existingPaper?.sha);
-
-    // Update concepts, entities, index, log
     for (const concept of knowledge.concepts) {
       await updateConceptPage(concept, meta.arxivId);
     }
     for (const entity of knowledge.entities) {
       await updateEntityPage(entity, meta.arxivId);
     }
-    await updateIndex();
     await appendLog(meta.arxivId, knowledge.titleCn || meta.title);
 
     return NextResponse.json({

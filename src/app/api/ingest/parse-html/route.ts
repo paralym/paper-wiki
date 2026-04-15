@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchArxivHtml, extractTextChunks, groupChunksForTranslation } from '@/lib/arxiv-html';
+import { supabase } from '@/lib/supabase';
 
 export async function POST(request: Request) {
   try {
@@ -12,12 +13,13 @@ export async function POST(request: Request) {
     const { chunks, articleHtml } = extractTextChunks(html);
     const groups = groupChunksForTranslation(chunks);
 
-    // Store the full HTML in the response for later assembly
-    // But to avoid payload limits, we store it via GitHub
-    const { putFile, getFile } = await import('@/lib/github');
-    const cachePath = `wiki/sources/${arxivId.replace('.', '-')}-html.txt`;
-    const existing = await getFile(cachePath);
-    await putFile(cachePath, articleHtml, `cache html: ${arxivId}`, existing?.sha);
+    const slug = arxivId.replace('.', '-');
+
+    // Cache HTML in Supabase
+    await supabase.from('html_cache').upsert({
+      slug,
+      html: articleHtml,
+    }, { onConflict: 'slug' });
 
     return NextResponse.json({
       groups: groups.map((g, i) => ({
