@@ -138,40 +138,26 @@ export default function Home() {
       if (!parseRes.ok) throw new Error(parseData.error);
 
       const { chunks } = parseData;
-      const translatableChunks = chunks.filter((c: { translatable: boolean }) => c.translatable);
-      setProgress({ current: 0, total: translatableChunks.length });
+      setProgress({ current: 0, total: chunks.length });
 
-      // Step 2: Translate chunks in parallel (concurrency = 4)
+      // Step 2: Translate all chunks in parallel
       const CONCURRENCY = 32;
-      const results: (string | null)[] = new Array(chunks.length).fill(null);
+      const results: string[] = new Array(chunks.length).fill('');
       let completed = 0;
 
-      // Fill in non-translatable chunks immediately
-      for (let i = 0; i < chunks.length; i++) {
-        if (!chunks[i].translatable) {
-          results[i] = chunks[i].text;
-        }
-      }
+      setStatus(`开始并行翻译 ${chunks.length} 个文本块...`);
 
-      // Get indices of translatable chunks
-      const translatableIndices = chunks
-        .map((c: { translatable: boolean }, i: number) => c.translatable ? i : -1)
-        .filter((i: number) => i !== -1);
-
-      setStatus(`开始并行翻译 ${translatableIndices.length} 个文本块...`);
-
-      // Process in batches of CONCURRENCY
-      for (let batch = 0; batch < translatableIndices.length; batch += CONCURRENCY) {
-        const batchIndices = translatableIndices.slice(batch, batch + CONCURRENCY);
-        const promises = batchIndices.map(async (idx: number) => {
+      for (let batch = 0; batch < chunks.length; batch += CONCURRENCY) {
+        const batchSlice = chunks.slice(batch, batch + CONCURRENCY);
+        const promises = batchSlice.map(async (chunk: { index: number; text: string }, i: number) => {
           const trRes = await fetch("/api/ingest/translate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: chunks[idx].text }),
+            body: JSON.stringify({ text: chunk.text }),
           });
           const trData = await safeJson(trRes);
           if (!trRes.ok) throw new Error(trData.error);
-          return { idx, translated: trData.translated };
+          return { idx: batch + i, translated: trData.translated };
         });
 
         const batchResults = await Promise.all(promises);
@@ -179,18 +165,16 @@ export default function Home() {
           results[idx] = translated;
           completed++;
         }
-        setProgress({ current: completed, total: translatableIndices.length });
-        setStatus(`正在翻译 (${completed}/${translatableIndices.length})...`);
+        setProgress({ current: completed, total: chunks.length });
+        setStatus(`正在翻译 (${completed}/${chunks.length})...`);
       }
-
-      const translatedParts = results as string[];
 
       // Step 3: Save and generate knowledge pages
       setStatus("正在生成知识页面...");
       const finishRes = await fetch("/api/ingest/finish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meta, translatedTex: translatedParts.join("") }),
+        body: JSON.stringify({ meta, translatedTex: results.join("\n\n") }),
       });
       const finishData = await safeJson(finishRes);
       if (!finishRes.ok) throw new Error(finishData.error);

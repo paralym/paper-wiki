@@ -35,10 +35,14 @@ export async function POST(request: Request) {
       }
     }
 
+    // Only return translatable chunks to stay under Vercel 4.5MB response limit
+    const translatableOnly = chunks
+      .filter((c) => c.translatable)
+      .map((c, i) => ({ index: i, text: c.text }));
+
     return NextResponse.json({
-      chunks,
-      totalChunks: chunks.length,
-      translatableChunks: chunks.filter((c) => c.translatable).length,
+      chunks: translatableOnly,
+      totalChunks: translatableOnly.length,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '下载失败';
