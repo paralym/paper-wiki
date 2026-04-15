@@ -11,32 +11,32 @@ export async function POST(request: Request) {
     const arxivId = parseArxivId(url);
     const meta = await fetchArxivMeta(arxivId);
     const texSource = await downloadLatexSource(arxivId);
-    const sections = parseTexForTranslation(texSource);
+    const paragraphs = parseTexForTranslation(texSource);
 
-    // Merge translatable sections into reasonable chunks for per-call translation
+    // Merge consecutive short translatable paragraphs to reduce API calls,
+    // but never break a paragraph — keep natural boundaries
+    const MAX_CHUNK = 6000;
     const chunks: { index: number; text: string; translatable: boolean }[] = [];
     let batch = '';
-    let batchStart = 0;
-    const BATCH_SIZE = 6000;
 
-    for (let i = 0; i < sections.length; i++) {
-      const s = sections[i];
-      if (!s.translatable) {
-        if (batch.trim()) {
+    for (const p of paragraphs) {
+      if (!p.translatable) {
+        if (batch) {
           chunks.push({ index: chunks.length, text: batch, translatable: true });
           batch = '';
         }
-        chunks.push({ index: chunks.length, text: s.content, translatable: false });
+        chunks.push({ index: chunks.length, text: p.content, translatable: false });
       } else {
-        if (batch.length + s.content.length > BATCH_SIZE && batch.trim()) {
+        // Merge short paragraphs, but split at paragraph boundary if too long
+        if (batch && batch.length + p.content.length > MAX_CHUNK) {
           chunks.push({ index: chunks.length, text: batch, translatable: true });
-          batch = s.content;
+          batch = p.content;
         } else {
-          batch += s.content;
+          batch += p.content;
         }
       }
     }
-    if (batch.trim()) {
+    if (batch) {
       chunks.push({ index: chunks.length, text: batch, translatable: true });
     }
 

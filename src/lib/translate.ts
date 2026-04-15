@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { TexSection } from './arxiv';
+import { TexChunk } from './arxiv';
 
 function getClient() {
   const base = process.env.OPENAI_BASE_URL || '';
@@ -72,7 +72,7 @@ export async function translateTexChunk(text: string, glossary?: Record<string, 
   return response.choices[0]?.message?.content || text;
 }
 
-export async function translateFullTex(sections: TexSection[]): Promise<string> {
+export async function translateFullTex(sections: TexChunk[]): Promise<string> {
   const results: string[] = [];
 
   let currentBatch = '';

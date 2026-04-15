@@ -155,101 +155,70 @@ async function findMainTexFile(dir: string): Promise<string> {
   throw new Error('在源码包中未找到 .tex 文件');
 }
 
-export interface TexSection {
-  type: 'preamble' | 'text' | 'math' | 'environment' | 'command';
+export interface TexChunk {
   content: string;
   translatable: boolean;
 }
 
-export function parseTexForTranslation(tex: string): TexSection[] {
-  const sections: TexSection[] = [];
+// Non-translatable environment names
+const SKIP_ENVS = new Set([
+  'equation', 'equation*', 'align', 'align*', 'gather', 'gather*',
+  'multline', 'multline*', 'eqnarray', 'eqnarray*', 'math', 'displaymath',
+  'lstlisting', 'verbatim', 'minted', 'algorithmic', 'algorithm',
+  'tikzpicture', 'figure', 'figure*', 'table', 'table*',
+]);
 
-  // Split into document preamble and body
+export function parseTexForTranslation(tex: string): TexChunk[] {
+  const chunks: TexChunk[] = [];
+
   const docBegin = tex.indexOf('\\begin{document}');
   const docEnd = tex.indexOf('\\end{document}');
 
   if (docBegin === -1) {
-    // No document environment, treat as all translatable
-    sections.push({ type: 'text', content: tex, translatable: true });
-    return sections;
+    chunks.push({ content: tex, translatable: true });
+    return chunks;
   }
 
   // Preamble — don't translate
-  sections.push({
-    type: 'preamble',
+  chunks.push({
     content: tex.slice(0, docBegin + '\\begin{document}'.length),
     translatable: false,
   });
 
   const body = tex.slice(docBegin + '\\begin{document}'.length, docEnd >= 0 ? docEnd : undefined);
 
-  // Split body into chunks: math blocks, commands, and text
-  // We translate text portions and leave math/commands intact
-  const chunks = splitTexBody(body);
-  sections.push(...chunks);
+  // Split body by paragraphs (double newline) and section commands
+  // This preserves the original document structure
+  const paragraphs = body.split(/(\n\s*\n)/);
+
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      // Whitespace/blank lines — preserve as-is
+      chunks.push({ content: para, translatable: false });
+      continue;
+    }
+
+    // Check if this paragraph is entirely a non-translatable environment
+    const envMatch = para.trim().match(/^\\begin\{(\w+\*?)\}[\s\S]*\\end\{\1\}$/);
+    if (envMatch && SKIP_ENVS.has(envMatch[1])) {
+      chunks.push({ content: para, translatable: false });
+      continue;
+    }
+
+    // Check if it's pure display math \[...\]
+    if (/^\s*\\\[[\s\S]*\\\]\s*$/.test(para)) {
+      chunks.push({ content: para, translatable: false });
+      continue;
+    }
+
+    // Otherwise it's a translatable paragraph (may contain inline math — that's fine,
+    // the LLM knows to preserve $...$ and \cite{} etc.)
+    chunks.push({ content: para, translatable: true });
+  }
 
   if (docEnd >= 0) {
-    sections.push({
-      type: 'command',
-      content: tex.slice(docEnd),
-      translatable: false,
-    });
+    chunks.push({ content: tex.slice(docEnd), translatable: false });
   }
 
-  return sections;
-}
-
-function splitTexBody(body: string): TexSection[] {
-  const sections: TexSection[] = [];
-
-  // Regex to match math environments and display math
-  const mathPattern = /(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\\begin\{(equation|align|gather|multline|eqnarray|math|displaymath)\*?\}[\s\S]*?\\end\{\2\*?\})/g;
-
-  // Non-translatable environments
-  const codePattern = /\\begin\{(lstlisting|verbatim|minted|algorithmic|algorithm|tikzpicture|figure|table)\*?\}[\s\S]*?\\end\{\1\*?\}/g;
-
-  // Combine all non-translatable patterns
-  const skipPattern = new RegExp(
-    `(${mathPattern.source}|${codePattern.source}|\\\\(?:label|ref|cite|citep|citet|url|href|includegraphics|bibliography|bibliographystyle)\\{[^}]*\\})`,
-    'g'
-  );
-
-  let lastIndex = 0;
-  let match;
-
-  const combined = new RegExp(skipPattern.source, 'g');
-
-  while ((match = combined.exec(body)) !== null) {
-    // Text before this match
-    if (match.index > lastIndex) {
-      const text = body.slice(lastIndex, match.index);
-      if (text.trim()) {
-        sections.push({ type: 'text', content: text, translatable: true });
-      } else {
-        sections.push({ type: 'text', content: text, translatable: false });
-      }
-    }
-
-    // The non-translatable match
-    sections.push({
-      type: match[0].startsWith('$') || match[0].startsWith('\\[') || match[0].startsWith('\\(') || match[0].startsWith('\\begin{equation')
-        ? 'math' : 'environment',
-      content: match[0],
-      translatable: false,
-    });
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Remaining text
-  if (lastIndex < body.length) {
-    const text = body.slice(lastIndex);
-    if (text.trim()) {
-      sections.push({ type: 'text', content: text, translatable: true });
-    } else {
-      sections.push({ type: 'text', content: text, translatable: false });
-    }
-  }
-
-  return sections;
+  return chunks;
 }
