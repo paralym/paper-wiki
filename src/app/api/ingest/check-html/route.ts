@@ -4,8 +4,8 @@ import { checkHtmlAvailable } from '@/lib/arxiv-html';
 export async function POST(request: Request) {
   try {
     const { arxivId } = await request.json();
-    const available = await checkHtmlAvailable(arxivId);
-    return NextResponse.json({ available });
+    const result = await checkHtmlAvailable(arxivId);
+    return NextResponse.json({ available: result.available });
   } catch {
     return NextResponse.json({ available: false });
   }
