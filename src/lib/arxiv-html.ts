@@ -6,42 +6,30 @@ export interface HtmlChunk {
   tag: string;       // parent element tag
 }
 
-// Try multiple HTML sources in order
-const HTML_SOURCES = [
-  (id: string) => `https://arxiv.org/html/${id}`,
-  (id: string) => `https://ar5iv.labs.arxiv.org/html/${id}`,
-];
-
 /**
- * Check if any HTML version exists, return the URL if found
+ * Check if arxiv HTML version exists (only arxiv.org/html)
  */
-export async function checkHtmlAvailable(arxivId: string): Promise<{ available: boolean; url?: string }> {
-  for (const makeUrl of HTML_SOURCES) {
-    try {
-      const url = makeUrl(arxivId);
-      const res = await fetch(url, { method: 'HEAD', redirect: 'follow' });
-      if (res.ok) return { available: true, url };
-    } catch {
-      continue;
-    }
+export async function checkHtmlAvailable(arxivId: string): Promise<{ available: boolean }> {
+  try {
+    const res = await fetch(`https://arxiv.org/html/${arxivId}`, {
+      method: 'HEAD',
+      redirect: 'follow',
+    });
+    return { available: res.ok };
+  } catch {
+    return { available: false };
   }
-  return { available: false };
 }
 
 /**
- * Fetch and return the arxiv HTML page
+ * Fetch arxiv HTML page
  */
 export async function fetchArxivHtml(arxivId: string): Promise<string> {
-  for (const makeUrl of HTML_SOURCES) {
-    try {
-      const url = makeUrl(arxivId);
-      const res = await fetch(url, { redirect: 'follow' });
-      if (res.ok) return await res.text();
-    } catch {
-      continue;
-    }
-  }
-  throw new Error('无法获取 HTML 版本');
+  const res = await fetch(`https://arxiv.org/html/${arxivId}`, {
+    redirect: 'follow',
+  });
+  if (!res.ok) throw new Error(`无法获取 HTML 版本: ${res.status}`);
+  return await res.text();
 }
 
 /**
