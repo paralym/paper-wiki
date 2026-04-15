@@ -2,9 +2,10 @@ import OpenAI from 'openai';
 import { TexSection } from './arxiv';
 
 function getClient() {
+  const base = process.env.OPENAI_BASE_URL || '';
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
-    baseURL: process.env.OPENAI_BASE_URL,
+    baseURL: base.endsWith('/v1') ? base : `${base}/v1`,
   });
 }
 

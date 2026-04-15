@@ -12,6 +12,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ translated });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '翻译出错';
+    const detail = error instanceof Error ? error.stack : String(error);
+    console.error('Translate error:', detail);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
