@@ -1,0 +1,44 @@
+{
+  "title": "AFlow：自动化智能代理工作流生成",
+  "title_en": "AFlow: Automating Agentic Workflow Generation",
+  "arxiv_id": "2410.10762",
+  "authors": [
+    "Jiayi Zhang",
+    "Jinyu Xiang",
+    "Zhaoyang Yu",
+    "Fengwei Teng",
+    "Xionghui Chen",
+    "Jiaqi Chen",
+    "Mingchen Zhuge",
+    "Xin Cheng",
+    "Sirui Hong",
+    "Jinlin Wang",
+    "Bingnan Zheng",
+    "Bang Liu",
+    "Yuyu Luo",
+    "Chenglin Wu"
+  ],
+  "date": "2024-10-14",
+  "categories": [
+    "cs.AI",
+    "cs.CL",
+    "cs.LG",
+    "cs.SE",
+    "cs.AI"
+  ],
+  "concepts": [
+    "Agentic Workflow",
+    "Monte Carlo Tree Search (MCTS)",
+    "Workflow Optimization as Search",
+    "Execution Feedback"
+  ],
+  "entities": [
+    "AFlow",
+    "GPT-4o",
+    "FoundationAgents"
+  ],
+  "summary": "该论文提出 AFlow 框架，利用蒙特卡洛树搜索自动优化基于代码表示的 LLM 智能代理工作流。",
+  "mode": "html",
+  "originalHtml": "\n        <article class=\"ltx_document\">\n        </article>\n      ",
+  "translatedHtml": "\n        <article class=\"ltx_document\">\n        </article>\n      "
+}
