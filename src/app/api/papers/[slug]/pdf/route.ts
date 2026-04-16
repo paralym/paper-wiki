@@ -33,10 +33,18 @@ export async function GET(
     // 3. Upload LaTeX to Supabase Storage (fast, within 10s)
     const texPath = `${slug}.tex`;
     const texBlob = new Blob([paper.content], { type: 'text/plain' });
-    await supabase.storage.from('papers').upload(texPath, texBlob, {
-      contentType: 'text/x-tex',
-      upsert: true,
-    });
+    const { error: uploadError } = await supabase.storage
+      .from('papers')
+      .upload(texPath, texBlob, {
+        contentType: 'text/x-tex',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return NextResponse.json({
+        error: `上传 LaTeX 到 Supabase 失败: ${uploadError.message}。请确认 papers bucket 已创建且为 Public。`
+      }, { status: 500 });
+    }
 
     const { data: texUrlData } = supabase.storage.from('papers').getPublicUrl(texPath);
     const texUrl = texUrlData.publicUrl;
