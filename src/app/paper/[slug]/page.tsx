@@ -1,10 +1,8 @@
 "use client";
 
-import { useState, useEffect, use, lazy, Suspense } from "react";
+import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-
-const LatexRenderer = lazy(() => import("@/components/LatexRenderer"));
 
 interface PaperResponse {
   data: {
@@ -28,6 +26,9 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<'side-by-side' | 'translated' | 'original'>('side-by-side');
   const [deleting, setDeleting] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [compiling, setCompiling] = useState(false);
+  const [compileError, setCompileError] = useState("");
 
   useEffect(() => {
     fetch(`/api/papers/${slug}`)
@@ -35,6 +36,28 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
       .then(setPaper)
       .catch(e => setError(e.message));
   }, [slug]);
+
+  async function compilePdf() {
+    if (pdfUrl || compiling) return;
+    setCompiling(true);
+    setCompileError("");
+    try {
+      const res = await fetch(`/api/papers/${slug}/pdf`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setPdfUrl(data.pdfUrl);
+    } catch (err: unknown) {
+      setCompileError(err instanceof Error ? err.message : "PDF 编译失败");
+    } finally {
+      setCompiling(false);
+    }
+  }
+
+  // Auto-compile PDF when paper loads
+  useEffect(() => {
+    if (paper) compilePdf();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paper]);
 
   async function handleDelete() {
     if (!confirm("确定删除这篇论文及其关联的概念/实体？")) return;
@@ -121,19 +144,46 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
           </div>
         )}
 
-        {/* Translation — LaTeX rendered */}
+        {/* Translation — PDF rendered via latexonline.cc */}
         {(viewMode === 'translated' || viewMode === 'side-by-side') && (
-          <div className="border border-border rounded-lg overflow-auto h-full">
+          <div className="border border-border rounded-lg overflow-hidden h-full flex flex-col">
             {viewMode === 'side-by-side' && (
-              <div className="text-xs text-muted px-4 py-2 bg-surface border-b border-border font-medium uppercase tracking-wide sticky top-0 z-10">
-                译文 Translation
+              <div className="text-xs text-muted px-4 py-2 bg-surface border-b border-border font-medium uppercase tracking-wide">
+                译文 Translation (PDF)
+                {pdfUrl && (
+                  <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="ml-2 text-accent">↗</a>
+                )}
               </div>
             )}
-            <div className="p-6">
-              <Suspense fallback={<div className="text-muted">正在渲染 LaTeX...</div>}>
-                <LatexRenderer latex={paper.content} />
-              </Suspense>
-            </div>
+            {compiling && !pdfUrl && (
+              <div className="flex-1 flex items-center justify-center text-muted">
+                <div className="text-center">
+                  <div className="mb-2">正在编译 PDF...</div>
+                  <div className="text-xs">首次编译可能需要 30-60 秒</div>
+                </div>
+              </div>
+            )}
+            {compileError && !pdfUrl && (
+              <div className="flex-1 flex items-center justify-center p-4">
+                <div className="text-center text-red-500">
+                  <div className="mb-2 font-medium">编译失败</div>
+                  <div className="text-xs text-muted break-all max-w-md">{compileError}</div>
+                  <button
+                    onClick={() => { setCompileError(""); compilePdf(); }}
+                    className="mt-4 px-4 py-1.5 text-sm text-accent border border-accent rounded-lg"
+                  >
+                    重试
+                  </button>
+                </div>
+              </div>
+            )}
+            {pdfUrl && (
+              <iframe
+                src={pdfUrl}
+                className="w-full flex-1 border-0"
+                title="Translated paper PDF"
+              />
+            )}
           </div>
         )}
       </div>
