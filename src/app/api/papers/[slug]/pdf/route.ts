@@ -8,30 +8,29 @@ export async function GET(
   try {
     const { slug } = await params;
 
-    // 1. Check if PDF is already cached in Supabase Storage
+    // 1. Check if PDF is already cached
     const pdfPath = `${slug}.pdf`;
     const { data: existing } = await supabase.storage
       .from('papers')
       .list('', { search: pdfPath });
 
     if (existing && existing.some(f => f.name === pdfPath)) {
-      // Return cached PDF URL
       const { data: urlData } = supabase.storage.from('papers').getPublicUrl(pdfPath);
       return NextResponse.json({ pdfUrl: urlData.publicUrl, cached: true });
     }
 
-    // 2. Get the translated LaTeX from database
+    // 2. Get LaTeX from DB
     const { data: paper } = await supabase
       .from('papers')
-      .select('content, arxiv_id')
+      .select('content')
       .eq('slug', slug)
       .single();
 
-    if (!paper || !paper.content) {
+    if (!paper?.content) {
       return NextResponse.json({ error: '论文不存在或无内容' }, { status: 404 });
     }
 
-    // 3. Upload LaTeX to Supabase Storage (public URL for latexonline.cc)
+    // 3. Upload LaTeX to Supabase Storage (fast, within 10s)
     const texPath = `${slug}.tex`;
     const texBlob = new Blob([paper.content], { type: 'text/plain' });
     await supabase.storage.from('papers').upload(texPath, texBlob, {
@@ -42,27 +41,16 @@ export async function GET(
     const { data: texUrlData } = supabase.storage.from('papers').getPublicUrl(texPath);
     const texUrl = texUrlData.publicUrl;
 
-    // 4. Call latexonline.cc to compile
+    // 4. Return latexonline.cc URL — browser iframe will handle the long compilation
     const compileUrl = `https://latexonline.cc/compile?url=${encodeURIComponent(texUrl)}&command=pdflatex&force=true`;
-    const pdfRes = await fetch(compileUrl);
 
-    if (!pdfRes.ok) {
-      const errText = await pdfRes.text();
-      return NextResponse.json({ error: `编译失败: ${errText.slice(0, 500)}` }, { status: 500 });
-    }
-
-    // 5. Upload PDF to Supabase Storage (cache it)
-    const pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
-    await supabase.storage.from('papers').upload(pdfPath, pdfBuffer, {
-      contentType: 'application/pdf',
-      upsert: true,
+    return NextResponse.json({
+      pdfUrl: compileUrl,
+      cached: false,
+      texUrl,  // client can call /cache endpoint later to cache the PDF
     });
-
-    const { data: pdfUrlData } = supabase.storage.from('papers').getPublicUrl(pdfPath);
-    return NextResponse.json({ pdfUrl: pdfUrlData.publicUrl, cached: false });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'PDF 生成失败';
-    console.error('PDF error:', error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
