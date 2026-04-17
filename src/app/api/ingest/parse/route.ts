@@ -138,8 +138,11 @@ Skip conference templates (iclr, neurips, icml formatting guides). The root file
     let fullContent: string;
     if (selectedPath) {
       const fullPath = path.join(dir, selectedPath);
+      console.log(`[parse] Agent selected: ${selectedPath}, fullPath: ${fullPath}`);
       const content = await fs.readFile(fullPath, 'utf-8');
+      console.log(`[parse] Raw file: ${content.length} chars, \\input count: ${(content.match(/\\input/g) || []).length}`);
       fullContent = await resolveInputs(content, path.dirname(fullPath));
+      console.log(`[parse] After resolveInputs: ${fullContent.length} chars`);
     } else {
       // Fallback
       const texFiles = await collectTexFiles(dir);

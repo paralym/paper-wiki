@@ -159,17 +159,32 @@ export async function resolveInputs(content: string, baseDir: string): Promise<s
     matches.push({ full: match[0], file: match[1] });
   }
 
+  console.log(`[resolveInputs] baseDir=${baseDir}, found ${matches.length} \\input commands`);
+
   for (const m of matches) {
     let inputPath = m.file;
-    if (!inputPath.endsWith('.tex')) inputPath += '.tex';
+    // Try with and without .tex extension
+    const candidates = [
+      path.join(baseDir, inputPath),
+      path.join(baseDir, inputPath + '.tex'),
+    ];
 
-    const fullPath = path.join(baseDir, inputPath);
-    try {
-      let inputContent = await fs.readFile(fullPath, 'utf-8');
-      inputContent = await resolveInputs(inputContent, path.dirname(fullPath));
-      result = result.replace(m.full, inputContent);
-    } catch {
-      // File not found, leave as-is
+    let resolved = false;
+    for (const fullPath of candidates) {
+      try {
+        let inputContent = await fs.readFile(fullPath, 'utf-8');
+        console.log(`[resolveInputs] OK: ${m.full} → ${fullPath} (${inputContent.length} chars)`);
+        inputContent = await resolveInputs(inputContent, path.dirname(fullPath));
+        result = result.replace(m.full, inputContent);
+        resolved = true;
+        break;
+      } catch {
+        // Try next candidate
+      }
+    }
+
+    if (!resolved) {
+      console.log(`[resolveInputs] FAILED: ${m.full} — tried: ${candidates.join(', ')}`);
     }
   }
 
