@@ -12,9 +12,7 @@ jobs:
       - name: Install TeX Live with Chinese support
         run: |
           sudo apt-get update
-          sudo apt-get install -y texlive-xetex texlive-lang-chinese texlive-fonts-recommended \
-            texlive-science texlive-latex-extra texlive-bibtex-extra biber \
-            fonts-noto-cjk fonts-noto-cjk-extra python3
+          sudo apt-get install -y texlive-full fonts-noto-cjk fonts-noto-cjk-extra python3
 
       - name: Download original source from arXiv
         env:
