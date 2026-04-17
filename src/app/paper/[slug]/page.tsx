@@ -37,20 +37,54 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
       .catch(e => setError(e.message));
   }, [slug]);
 
+  const LATEX_SERVER = "http://43.160.252.187:8765";
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+
   async function loadPdf() {
-    if (pdfUrl || compiling) return;
+    if (pdfUrl || compiling || !paper) return;
     setCompiling(true);
     setCompileError("");
+
     try {
-      const res = await fetch(`/api/papers/${slug}/pdf`);
-      const data = await res.json();
-      if (data.status === 'ready' && data.pdfUrl) {
-        setPdfUrl(data.pdfUrl);
-      } else if (data.error) {
-        setCompileError(data.error);
+      // 1. Check Supabase cache first
+      const cacheUrl = `${SUPABASE_URL}/storage/v1/object/public/papers/${slug}.pdf`;
+      const cacheRes = await fetch(cacheUrl, { method: 'HEAD' });
+      if (cacheRes.ok) {
+        setPdfUrl(cacheUrl);
+        setCompiling(false);
+        return;
       }
+
+      // 2. No cache — compile on our server (no timeout limit)
+      const compileRes = await fetch(`${LATEX_SERVER}/compile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          arxiv_id: paper.data.arxiv_id,
+          translated_body: paper.content,
+        }),
+      });
+
+      if (!compileRes.ok) {
+        const err = await compileRes.json().catch(() => ({ error: 'Unknown' }));
+        throw new Error(err.error || `HTTP ${compileRes.status}`);
+      }
+
+      // 3. Got PDF — show it immediately via blob URL
+      const pdfBlob = await compileRes.blob();
+      const blobUrl = URL.createObjectURL(pdfBlob);
+      setPdfUrl(blobUrl);
+
+      // 4. Upload to Supabase cache in background (via our API to avoid CORS)
+      const formData = new FormData();
+      formData.append('pdf', pdfBlob);
+      fetch(`/api/papers/${slug}/cache-pdf`, {
+        method: 'POST',
+        body: formData,
+      }).catch(() => {}); // fire and forget
+
     } catch (err: unknown) {
-      setCompileError(err instanceof Error ? err.message : "PDF 请求失败");
+      setCompileError(err instanceof Error ? err.message : "PDF 编译失败");
     } finally {
       setCompiling(false);
     }
@@ -164,7 +198,7 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  <div className="mb-1">{pdfStatus || "正在编译 PDF..."}</div>
+                  <div className="mb-1">正在编译 PDF...</div>
                   <div className="text-xs">页面会自动刷新，请稍候</div>
                 </div>
               </div>
