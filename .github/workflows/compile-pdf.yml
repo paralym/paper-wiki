@@ -7,7 +7,7 @@ on:
 jobs:
   compile:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Install TeX Live with Chinese support
         run: |
@@ -26,19 +26,16 @@ jobs:
         run: |
           mkdir -p source
           cd source
-          # Try gunzip first
           if gunzip -c ../source.gz > source.tar 2>/dev/null; then
             if tar tf source.tar > /dev/null 2>&1; then
               tar xf source.tar
               rm source.tar
               echo "Extracted tar archive"
             else
-              # It's a plain tex file (gzipped)
               mv source.tar main.tex
               echo "Single tex file"
             fi
           else
-            # Not gzipped, might be raw tex
             cp ../source.gz main.tex
             echo "Raw tex file"
           fi
@@ -50,83 +47,74 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           PAPER_SLUG: ${{ github.event.client_payload.slug }}
         run: |
-          curl -f -o /tmp/translated_body.tex \
-            "${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.tex"
-          echo "Translated body: $(wc -l < /tmp/translated_body.tex) lines, $(wc -c < /tmp/translated_body.tex) bytes"
+          curl -f -o /tmp/translated_body.tex "${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.tex"
+          echo "Translated body: $(wc -l < /tmp/translated_body.tex) lines"
+          echo "=== Preview ==="
+          head -10 /tmp/translated_body.tex
 
-      - name: Merge translated body into original source
+      - name: Write merge script
         run: |
-          cd source
+          cat > /tmp/merge.py << 'SCRIPT'
+          import os, sys, glob
 
           # Find main tex file
-          export MAIN_FILE=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1)
-          if [ -z "$MAIN_FILE" ]; then
-            export MAIN_FILE=$(find . -name '*.tex' -exec grep -l '\\begin{document}' {} \; | head -1)
-          fi
-          echo "Main file: $MAIN_FILE"
-          echo "=== Original body preview ==="
-          grep -A 3 '\\begin{document}' "$MAIN_FILE" || true
-          echo "=== Translated body preview ==="
-          head -5 /tmp/translated_body.tex
+          tex_files = glob.glob('source/**/*.tex', recursive=True) + glob.glob('source/*.tex')
+          main_file = None
+          for f in tex_files:
+              with open(f, 'r', encoding='utf-8', errors='replace') as fh:
+                  if '\\begin{document}' in fh.read():
+                      main_file = f
+                      break
 
-          python3 -c "
-import os
+          if not main_file:
+              print("ERROR: No file with \\begin{document} found")
+              sys.exit(1)
 
-main_file = os.environ['MAIN_FILE']
-print(f'Merging into: {main_file}')
+          print(f"Main file: {main_file}")
 
-with open(main_file, 'r', encoding='utf-8', errors='replace') as f:
-    original = f.read()
+          with open(main_file, 'r', encoding='utf-8', errors='replace') as f:
+              original = f.read()
 
-with open('/tmp/translated_body.tex', 'r', encoding='utf-8', errors='replace') as f:
-    translated = f.read()
+          with open('/tmp/translated_body.tex', 'r', encoding='utf-8', errors='replace') as f:
+              translated = f.read()
 
-begin_idx = original.find(r'\begin{document}')
-end_idx = original.rfind(r'\end{document}')
+          begin_idx = original.find('\\begin{document}')
+          if begin_idx == -1:
+              print("ERROR: No \\begin{document} found in file content")
+              sys.exit(1)
 
-if begin_idx == -1:
-    print('ERROR: No begin document found')
-    exit(1)
+          preamble = original[:begin_idx]
 
-preamble = original[:begin_idx]
+          if 'xeCJK' not in preamble and 'ctex' not in preamble:
+              preamble += '\n\\usepackage{xeCJK}\n'
+              preamble += '\\setCJKmainfont{Noto Serif CJK SC}\n'
+              preamble += '\\setCJKsansfont{Noto Sans CJK SC}\n'
+              preamble += '\\setCJKmonofont{Noto Sans Mono CJK SC}\n'
 
-# Inject xeCJK if not present
-if 'xeCJK' not in preamble and 'ctex' not in preamble:
-    cjk = r'''
-\usepackage{xeCJK}
-\setCJKmainfont{Noto Serif CJK SC}
-\setCJKsansfont{Noto Sans CJK SC}
-\setCJKmonofont{Noto Sans Mono CJK SC}
-'''
-    preamble = preamble.rstrip() + '\n' + cjk + '\n'
+          new_content = preamble + '\\begin{document}\n' + translated + '\n\\end{document}\n'
 
-new_content = preamble + r'\begin{document}' + '\n' + translated + '\n' + r'\end{document}' + '\n'
+          with open(main_file, 'w', encoding='utf-8') as f:
+              f.write(new_content)
 
-with open(main_file, 'w', encoding='utf-8') as f:
-    f.write(new_content)
+          print(f"Merged: {len(preamble)} preamble + {len(translated)} body chars")
+          print(f"Total: {len(new_content)} chars written to {main_file}")
+          SCRIPT
 
-print(f'Done: {len(preamble)} chars preamble + {len(translated)} chars translated body')
-          "
+      - name: Merge translated body into original source
+        run: python3 /tmp/merge.py
 
       - name: Compile with XeLaTeX
         run: |
           cd source
           MAIN=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1 || echo "main.tex")
           echo "Compiling: $MAIN"
-
-          # First pass
           xelatex -interaction=nonstopmode "$MAIN" 2>&1 | tail -20 || true
-
-          # Second pass (for references)
           xelatex -interaction=nonstopmode "$MAIN" 2>&1 | tail -5 || true
-
-          # Check if PDF was generated
           PDF="${MAIN%.tex}.pdf"
           if [ -f "$PDF" ]; then
-            echo "SUCCESS: PDF generated ($(wc -c < "$PDF") bytes, $(pdfinfo "$PDF" 2>/dev/null | grep Pages || echo 'unknown pages'))"
+            echo "SUCCESS: $(wc -c < "$PDF") bytes"
           else
-            echo "FAILED: No PDF generated"
-            # Show last errors
+            echo "FAILED: No PDF"
             cat "${MAIN%.tex}.log" | grep "^!" | head -20
             exit 1
           fi
@@ -140,17 +128,6 @@ print(f'Done: {len(preamble)} chars preamble + {len(translated)} chars translate
           cd source
           MAIN=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1 || echo "main.tex")
           PDF="${MAIN%.tex}.pdf"
-
-          # Delete existing PDF (ignore errors)
-          curl -s -X DELETE \
-            "${SUPABASE_URL}/storage/v1/object/papers/${PAPER_SLUG}.pdf" \
-            -H "Authorization: Bearer ${SUPABASE_KEY}" || true
-
-          # Upload PDF
-          curl -f -X POST \
-            "${SUPABASE_URL}/storage/v1/object/papers/${PAPER_SLUG}.pdf" \
-            -H "Authorization: Bearer ${SUPABASE_KEY}" \
-            -H "Content-Type: application/pdf" \
-            --data-binary @"$PDF"
-
-          echo "PDF uploaded: ${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.pdf"
+          curl -s -X DELETE "${SUPABASE_URL}/storage/v1/object/papers/${PAPER_SLUG}.pdf" -H "Authorization: Bearer ${SUPABASE_KEY}" || true
+          curl -f -X POST "${SUPABASE_URL}/storage/v1/object/papers/${PAPER_SLUG}.pdf" -H "Authorization: Bearer ${SUPABASE_KEY}" -H "Content-Type: application/pdf" --data-binary @"$PDF"
+          echo "Uploaded: ${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.pdf"
