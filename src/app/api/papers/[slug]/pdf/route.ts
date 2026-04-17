@@ -21,7 +21,19 @@ export async function GET(
 
     const texPath = `${slug}.tex`;
 
-    // 2. Get LaTeX from DB
+    // 2. If tex already uploaded, Action was already triggered — just wait
+    const { data: texExists } = await supabase.storage
+      .from('papers')
+      .list('', { search: texPath });
+
+    if (texExists && texExists.some(f => f.name === texPath)) {
+      return NextResponse.json({
+        status: 'compiling',
+        message: 'PDF 正在编译中（GitHub Actions），请稍候...',
+      });
+    }
+
+    // 3. Get LaTeX from DB
     const { data: paper } = await supabase
       .from('papers')
       .select('content')
