@@ -58,74 +58,55 @@ jobs:
         run: |
           cd source
 
-          # Find main tex file (with \begin{document})
-          MAIN=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1)
-          if [ -z "$MAIN" ]; then
-            MAIN=$(find . -name '*.tex' -exec grep -l '\\begin{document}' {} \; | head -1)
+          # Find main tex file
+          export MAIN_FILE=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1)
+          if [ -z "$MAIN_FILE" ]; then
+            export MAIN_FILE=$(find . -name '*.tex' -exec grep -l '\\begin{document}' {} \; | head -1)
           fi
-          if [ -z "$MAIN" ]; then
-            MAIN=$(ls -S *.tex 2>/dev/null | head -1)
-          fi
-          echo "Main file: $MAIN"
+          echo "Main file: $MAIN_FILE"
+          echo "=== Original body preview ==="
+          grep -A 3 '\\begin{document}' "$MAIN_FILE" || true
+          echo "=== Translated body preview ==="
+          head -5 /tmp/translated_body.tex
 
-          # Use Python to do the merge precisely
-          python3 << 'PYEOF'
-          import os, re
+          python3 -c "
+import os
 
-          main_file = os.environ.get('MAIN', '') or 'main.tex'
-          # Find the actual main file
-          for f in os.listdir('.'):
-              if f == main_file:
-                  break
-          else:
-              # Try find
-              for root, dirs, files in os.walk('.'):
-                  for f in files:
-                      path = os.path.join(root, f)
-                      if f.endswith('.tex'):
-                          with open(path) as fh:
-                              if '\\begin{document}' in fh.read():
-                                  main_file = path
-                                  break
+main_file = os.environ['MAIN_FILE']
+print(f'Merging into: {main_file}')
 
-          print(f"Using main file: {main_file}")
+with open(main_file, 'r', encoding='utf-8', errors='replace') as f:
+    original = f.read()
 
-          with open(main_file, 'r', encoding='utf-8', errors='replace') as f:
-              original = f.read()
+with open('/tmp/translated_body.tex', 'r', encoding='utf-8', errors='replace') as f:
+    translated = f.read()
 
-          with open('/tmp/translated_body.tex', 'r', encoding='utf-8', errors='replace') as f:
-              translated = f.read()
+begin_idx = original.find(r'\begin{document}')
+end_idx = original.rfind(r'\end{document}')
 
-          # Find \begin{document} and \end{document}
-          begin_idx = original.find('\\begin{document}')
-          end_idx = original.rfind('\\end{document}')
+if begin_idx == -1:
+    print('ERROR: No begin document found')
+    exit(1)
 
-          if begin_idx == -1:
-              print("ERROR: No \\begin{document} found")
-              exit(1)
+preamble = original[:begin_idx]
 
-          # Keep the original preamble (everything before \begin{document})
-          preamble = original[:begin_idx]
+# Inject xeCJK if not present
+if 'xeCJK' not in preamble and 'ctex' not in preamble:
+    cjk = r'''
+\usepackage{xeCJK}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
+'''
+    preamble = preamble.rstrip() + '\n' + cjk + '\n'
 
-          # Add xeCJK support for Chinese right before \begin{document}
-          # Check if xeCJK or ctex is already loaded
-          if 'xeCJK' not in preamble and 'ctex' not in preamble and 'CJK' not in preamble:
-              cjk_setup = """
-          \\usepackage{xeCJK}
-          \\setCJKmainfont{Noto Serif CJK SC}
-          \\setCJKsansfont{Noto Sans CJK SC}
-          \\setCJKmonofont{Noto Sans Mono CJK SC}
-          """
-              preamble = preamble.rstrip() + '\n' + cjk_setup + '\n'
+new_content = preamble + r'\begin{document}' + '\n' + translated + '\n' + r'\end{document}' + '\n'
 
-          # Build the new file: original preamble + translated body
-          new_content = preamble + '\\begin{document}\n' + translated + '\n\\end{document}\n'
+with open(main_file, 'w', encoding='utf-8') as f:
+    f.write(new_content)
 
-          with open(main_file, 'w', encoding='utf-8') as f:
-              f.write(new_content)
-
-          print(f"Merged: {len(preamble)} chars preamble + {len(translated)} chars body")
-          PYEOF
+print(f'Done: {len(preamble)} chars preamble + {len(translated)} chars translated body')
+          "
 
       - name: Compile with XeLaTeX
         run: |
