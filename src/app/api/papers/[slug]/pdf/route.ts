@@ -19,17 +19,9 @@ export async function GET(
       return NextResponse.json({ status: 'ready', pdfUrl: urlData.publicUrl });
     }
 
-    // 2. Check if compilation is already triggered (tex file exists = in progress)
     const texPath = `${slug}.tex`;
-    const { data: texExists } = await supabase.storage
-      .from('papers')
-      .list('', { search: texPath });
 
-    if (texExists && texExists.some(f => f.name === texPath)) {
-      return NextResponse.json({ status: 'compiling', message: 'PDF 正在编译中，请稍候刷新...' });
-    }
-
-    // 3. Get LaTeX from DB
+    // 2. Get LaTeX from DB
     const { data: paper } = await supabase
       .from('papers')
       .select('content')
