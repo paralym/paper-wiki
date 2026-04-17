@@ -37,39 +37,27 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
       .catch(e => setError(e.message));
   }, [slug]);
 
-  const [pdfStatus, setPdfStatus] = useState("");
-
-  async function checkPdf() {
+  async function loadPdf() {
+    if (pdfUrl || compiling) return;
+    setCompiling(true);
+    setCompileError("");
     try {
       const res = await fetch(`/api/papers/${slug}/pdf`);
       const data = await res.json();
-      if (data.status === 'ready') {
+      if (data.status === 'ready' && data.pdfUrl) {
         setPdfUrl(data.pdfUrl);
-        setCompiling(false);
-        setPdfStatus("");
-      } else if (data.status === 'compiling') {
-        setCompiling(true);
-        setPdfStatus("PDF 正在编译中...");
-      } else if (data.status === 'triggered') {
-        setCompiling(true);
-        setPdfStatus(data.message);
       } else if (data.error) {
         setCompileError(data.error);
-        setCompiling(false);
       }
     } catch (err: unknown) {
       setCompileError(err instanceof Error ? err.message : "PDF 请求失败");
+    } finally {
+      setCompiling(false);
     }
   }
 
-  // Check PDF status on load and poll while compiling
   useEffect(() => {
-    if (!paper) return;
-    checkPdf();
-    const interval = setInterval(() => {
-      if (!pdfUrl) checkPdf();
-    }, 15000); // poll every 15s while no PDF
-    return () => clearInterval(interval);
+    if (paper) loadPdf();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paper]);
 
@@ -187,7 +175,7 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
                   <div className="mb-2 font-medium">编译失败</div>
                   <div className="text-xs text-muted break-all max-w-md">{compileError}</div>
                   <button
-                    onClick={() => { setCompileError(""); checkPdf(); }}
+                    onClick={() => { setCompileError(""); loadPdf(); }}
                     className="mt-4 px-4 py-1.5 text-sm text-accent border border-accent rounded-lg"
                   >
                     重试
