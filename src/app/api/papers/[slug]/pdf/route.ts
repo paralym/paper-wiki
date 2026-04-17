@@ -8,7 +8,7 @@ export async function GET(
   try {
     const { slug } = await params;
 
-    // 1. Check if PDF is already cached
+    // 1. Check if PDF is already cached in Supabase Storage
     const pdfPath = `${slug}.pdf`;
     const { data: existing } = await supabase.storage
       .from('papers')
@@ -16,10 +16,20 @@ export async function GET(
 
     if (existing && existing.some(f => f.name === pdfPath)) {
       const { data: urlData } = supabase.storage.from('papers').getPublicUrl(pdfPath);
-      return NextResponse.json({ pdfUrl: urlData.publicUrl, cached: true });
+      return NextResponse.json({ status: 'ready', pdfUrl: urlData.publicUrl });
     }
 
-    // 2. Get LaTeX from DB
+    // 2. Check if compilation is already triggered (tex file exists = in progress)
+    const texPath = `${slug}.tex`;
+    const { data: texExists } = await supabase.storage
+      .from('papers')
+      .list('', { search: texPath });
+
+    if (texExists && texExists.some(f => f.name === texPath)) {
+      return NextResponse.json({ status: 'compiling', message: 'PDF 正在编译中，请稍候刷新...' });
+    }
+
+    // 3. Get LaTeX from DB
     const { data: paper } = await supabase
       .from('papers')
       .select('content')
@@ -30,35 +40,37 @@ export async function GET(
       return NextResponse.json({ error: '论文不存在或无内容' }, { status: 404 });
     }
 
-    // 3. Wrap content in a standalone template that doesn't depend on conference style files
+    // 4. Build standalone LaTeX and upload to Supabase
     const standaloneTex = buildStandaloneTex(paper.content);
-
-    // 4. Upload LaTeX to Supabase Storage (fast, within 10s)
-    const texPath = `${slug}.tex`;
     const texBlob = new Blob([standaloneTex], { type: 'text/plain' });
     const { error: uploadError } = await supabase.storage
       .from('papers')
-      .upload(texPath, texBlob, {
-        contentType: 'text/x-tex',
-        upsert: true,
-      });
+      .upload(texPath, texBlob, { contentType: 'text/x-tex', upsert: true });
 
     if (uploadError) {
-      return NextResponse.json({
-        error: `上传 LaTeX 到 Supabase 失败: ${uploadError.message}。请确认 papers bucket 已创建且为 Public。`
-      }, { status: 500 });
+      return NextResponse.json({ error: `上传失败: ${uploadError.message}` }, { status: 500 });
     }
 
-    const { data: texUrlData } = supabase.storage.from('papers').getPublicUrl(texPath);
-    const texUrl = texUrlData.publicUrl;
-
-    // 4. Return latexonline.cc URL — browser iframe will handle the long compilation
-    const compileUrl = `https://latexonline.cc/compile?url=${encodeURIComponent(texUrl)}&command=pdflatex&force=true`;
+    // 5. Trigger GitHub Action to compile
+    const ghToken = process.env.GITHUB_TOKEN;
+    if (ghToken) {
+      await fetch('https://api.github.com/repos/paralym/paper-wiki/dispatches', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${ghToken}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: JSON.stringify({
+          event_type: 'compile-pdf',
+          client_payload: { slug },
+        }),
+      });
+    }
 
     return NextResponse.json({
-      pdfUrl: compileUrl,
-      cached: false,
-      texUrl,  // client can call /cache endpoint later to cache the PDF
+      status: 'triggered',
+      message: 'PDF 编译已触发，通常需要 1-2 分钟。请稍后刷新页面。',
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'PDF 生成失败';
@@ -66,15 +78,10 @@ export async function GET(
   }
 }
 
-/**
- * Wrap translated LaTeX content in a standalone article template
- * that compiles without conference-specific style files.
- */
 function buildStandaloneTex(translatedLatex: string): string {
-  // Extract body content between \begin{document} and \end{document}
-  const docBegin = translatedLatex.indexOf('\\begin{document}');
-  const docEnd = translatedLatex.indexOf('\\end{document}');
   let body = translatedLatex;
+  const docBegin = body.indexOf('\\begin{document}');
+  const docEnd = body.indexOf('\\end{document}');
   if (docBegin !== -1) {
     body = body.slice(docBegin + '\\begin{document}'.length);
     if (docEnd !== -1) {
@@ -82,20 +89,20 @@ function buildStandaloneTex(translatedLatex: string): string {
     }
   }
 
-  // Extract title if we can find it from common conference commands
-  let title = '';
-  const titleMatch = body.match(/\\(?:icmltitle|title|acltitle|nipstitle|neuripstitle)\s*\{([^}]*)\}/);
+  // Extract title
+  let title = '论文翻译';
+  const titleMatch = body.match(/\\(?:icmltitle|title|acltitle)\s*\{([^}]*)\}/);
   if (titleMatch) title = titleMatch[1];
 
   // Extract authors
   const authors: string[] = [];
-  const authorPattern = /\\(?:icmlauthor|author|aclauthor)\s*\{([^}]+)\}/g;
+  const authorPattern = /\\(?:icmlauthor|author)\s*\{([^}]+)\}/g;
   let m;
   while ((m = authorPattern.exec(body)) !== null) {
     if (!authors.includes(m[1])) authors.push(m[1]);
   }
 
-  // Strip conference-specific commands that don't exist in standard article class
+  // Strip conference-specific commands
   body = body
     .replace(/\\icmltitle\s*\{[^}]*\}/g, '')
     .replace(/\\icmlauthor\s*\{[^}]+\}\s*\{[^}]+\}/g, '')
@@ -110,18 +117,16 @@ function buildStandaloneTex(translatedLatex: string): string {
     .replace(/\\ifcolmsubmission[\s\S]*?\\fi/g, '')
     .replace(/\\linenumbers/g, '')
     .replace(/\\maketitle/g, '')
-    // Strip \input{} references to missing section files (we already inlined what we have)
     .replace(/\\input\s*\{[^}]+\}/g, '')
-    // Strip bibliography commands since we don't have the .bib file
     .replace(/\\bibliography\s*\{[^}]+\}/g, '')
     .replace(/\\bibliographystyle\s*\{[^}]+\}/g, '')
-    // Skip missing figures gracefully
-    .replace(/\\includegraphics(\[[^\]]*\])?\{[^}]+\}/g, '\\fbox{\\texttt{[图片]}}');
+    .replace(/\\includegraphics(\[[^\]]*\])?\{[^}]+\}/g, '\\fbox{[图片]}');
 
-  const authorsStr = authors.length > 0 ? authors.join(' \\and ') : '作者';
-
-  return `\\documentclass[11pt]{article}
-\\usepackage[UTF8]{ctex}
+  return `\\documentclass[11pt,a4paper]{article}
+\\usepackage{xeCJK}
+\\setCJKmainfont{Noto Serif CJK SC}
+\\setCJKsansfont{Noto Sans CJK SC}
+\\setCJKmonofont{Noto Sans Mono CJK SC}
 \\usepackage[margin=1in]{geometry}
 \\usepackage{amsmath,amssymb,amsthm}
 \\usepackage{graphicx}
@@ -132,13 +137,11 @@ function buildStandaloneTex(translatedLatex: string): string {
 \\usepackage{xcolor}
 \\usepackage{enumitem}
 \\usepackage{caption}
-\\usepackage{subcaption}
 \\usepackage{url}
-\\usepackage{color}
 \\usepackage{microtype}
 
-\\title{${title || '论文翻译'}}
-\\author{${authorsStr}}
+\\title{${title}}
+\\author{${authors.length > 0 ? authors.join(' \\\\and ') : ''}}
 \\date{}
 
 \\begin{document}
@@ -149,4 +152,3 @@ ${body}
 \\end{document}
 `;
 }
-

@@ -37,25 +37,39 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
       .catch(e => setError(e.message));
   }, [slug]);
 
-  async function compilePdf() {
-    if (pdfUrl || compiling) return;
-    setCompiling(true);
-    setCompileError("");
+  const [pdfStatus, setPdfStatus] = useState("");
+
+  async function checkPdf() {
     try {
       const res = await fetch(`/api/papers/${slug}/pdf`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setPdfUrl(data.pdfUrl);
+      if (data.status === 'ready') {
+        setPdfUrl(data.pdfUrl);
+        setCompiling(false);
+        setPdfStatus("");
+      } else if (data.status === 'compiling') {
+        setCompiling(true);
+        setPdfStatus("PDF 正在编译中...");
+      } else if (data.status === 'triggered') {
+        setCompiling(true);
+        setPdfStatus(data.message);
+      } else if (data.error) {
+        setCompileError(data.error);
+        setCompiling(false);
+      }
     } catch (err: unknown) {
-      setCompileError(err instanceof Error ? err.message : "PDF 编译失败");
-    } finally {
-      setCompiling(false);
+      setCompileError(err instanceof Error ? err.message : "PDF 请求失败");
     }
   }
 
-  // Auto-compile PDF when paper loads
+  // Check PDF status on load and poll while compiling
   useEffect(() => {
-    if (paper) compilePdf();
+    if (!paper) return;
+    checkPdf();
+    const interval = setInterval(() => {
+      if (!pdfUrl) checkPdf();
+    }, 15000); // poll every 15s while no PDF
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paper]);
 
@@ -158,18 +172,22 @@ export default function PaperPage({ params }: { params: Promise<{ slug: string }
             {compiling && !pdfUrl && (
               <div className="flex-1 flex items-center justify-center text-muted">
                 <div className="text-center">
-                  <div className="mb-2">正在编译 PDF...</div>
-                  <div className="text-xs">首次编译可能需要 30-60 秒</div>
+                  <svg className="animate-spin h-6 w-6 mx-auto mb-3" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <div className="mb-1">{pdfStatus || "正在编译 PDF..."}</div>
+                  <div className="text-xs">页面会自动刷新，请稍候</div>
                 </div>
               </div>
             )}
-            {compileError && !pdfUrl && (
+            {compileError && !pdfUrl && !compiling && (
               <div className="flex-1 flex items-center justify-center p-4">
                 <div className="text-center text-red-500">
                   <div className="mb-2 font-medium">编译失败</div>
                   <div className="text-xs text-muted break-all max-w-md">{compileError}</div>
                   <button
-                    onClick={() => { setCompileError(""); compilePdf(); }}
+                    onClick={() => { setCompileError(""); checkPdf(); }}
                     className="mt-4 px-4 py-1.5 text-sm text-accent border border-accent rounded-lg"
                   >
                     重试

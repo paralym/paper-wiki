@@ -1,0 +1,56 @@
+name: Compile LaTeX to PDF
+
+on:
+  repository_dispatch:
+    types: [compile-pdf]
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install TeX Live with Chinese support
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y texlive-xetex texlive-lang-chinese texlive-fonts-recommended texlive-science texlive-latex-extra fonts-noto-cjk
+
+      - name: Download LaTeX source from Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          PAPER_SLUG: ${{ github.event.client_payload.slug }}
+        run: |
+          TEX_URL="${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.tex"
+          echo "Downloading: $TEX_URL"
+          curl -f -o paper.tex "$TEX_URL"
+          cat paper.tex | head -20
+
+      - name: Compile with XeLaTeX
+        run: |
+          # XeLaTeX supports CJK natively with system fonts
+          xelatex -interaction=nonstopmode -halt-on-error paper.tex || true
+          xelatex -interaction=nonstopmode paper.tex || true
+          ls -la paper.pdf 2>/dev/null && echo "PDF compiled successfully" || echo "PDF compilation failed"
+
+      - name: Upload PDF to Supabase Storage
+        if: ${{ hashFiles('paper.pdf') != '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          PAPER_SLUG: ${{ github.event.client_payload.slug }}
+        run: |
+          # Upload PDF via Supabase Storage REST API
+          PDF_PATH="${PAPER_SLUG}.pdf"
+
+          # Try to delete existing file first (ignore errors)
+          curl -s -X DELETE \
+            "${SUPABASE_URL}/storage/v1/object/papers/${PDF_PATH}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}" || true
+
+          # Upload new PDF
+          curl -f -X POST \
+            "${SUPABASE_URL}/storage/v1/object/papers/${PDF_PATH}" \
+            -H "Authorization: Bearer ${SUPABASE_KEY}" \
+            -H "Content-Type: application/pdf" \
+            --data-binary @paper.pdf
+
+          echo "PDF uploaded to: ${SUPABASE_URL}/storage/v1/object/public/papers/${PDF_PATH}"
