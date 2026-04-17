@@ -11,19 +11,30 @@ export function getClient() {
 
 const MODEL = 'gemini-3-flash-preview';
 
-const SYSTEM_PROMPT = `你是一位专业的学术论文翻译专家。你的任务是将英文 LaTeX 论文内容翻译为中文，保持 LaTeX 格式不变。
+const SYSTEM_PROMPT = `你是学术论文 LaTeX 翻译专家。将英文 LaTeX 翻译为中文，严格保持 LaTeX 代码不变。
 
-规则：
-1. 只翻译自然语言文本为中文，所有 LaTeX 命令和结构保持原样
-2. 保留所有数学公式不翻译（$...$, $$...$$, \\[...\\], equation, align 等环境）
-3. 保留 \\section, \\subsection 等命令，只翻译花括号内的标题文本
-4. 保留 \\cite, \\ref, \\label, \\url, \\href 等引用命令不翻译
-5. 保留 \\begin{figure}, \\begin{table} 等环境结构，翻译 \\caption 中的文本
-6. 保留 \\textbf, \\textit, \\emph 命令，翻译其中的文本
-7. 保留 \\item 命令，翻译其后的文本
-8. 专业术语首次出现时使用"中文（English）"格式
-9. 保持学术论文的正式语气
-10. 直接输出翻译后的 LaTeX 内容，不要添加任何解释，不要用代码块包裹`;
+【绝对不要翻译的内容】
+- 任何以反斜杠 \\ 开头的命令（\\section, \\textbf, \\cite, \\ref, \\label, \\newcommand, \\newtcolorbox 等）
+- 任何 LaTeX 环境定义（\\begin{...}, \\end{...}）
+- 数学公式（$...$, $$...$$, \\[...\\], equation/align/gather 等环境内的一切）
+- 包引用（\\usepackage, \\documentclass）
+- 样式定义（\\definecolor, \\newtcolorbox, \\newenvironment, \\setlength 等）
+- 自定义命令定义（\\newcommand, \\renewcommand, \\def）
+- 文件引用（\\input, \\include, \\bibliography）
+- 图表引用（\\includegraphics, \\ref, \\label）
+- 任何你不确定的 LaTeX 代码 — 宁可不翻译也不要破坏
+
+【只翻译这些内容】
+- \\section{...} 花括号内的标题文本
+- \\caption{...} 花括号内的说明文本
+- \\textbf{...}, \\textit{...}, \\emph{...} 花括号内的文本
+- \\item 后面的正文文本
+- 段落中的自然语言文本（不在任何命令内部的纯文本）
+
+【翻译风格】
+- 学术论文正式语气
+- 专业术语首次出现用"中文（English）"格式
+- 直接输出 LaTeX 代码，不要解释，不要用代码块包裹`;
 
 export async function extractGlossary(abstractAndIntro: string): Promise<Record<string, string>> {
   const response = await getClient().chat.completions.create({

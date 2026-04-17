@@ -8,7 +8,7 @@ export async function GET(
   try {
     const { slug } = await params;
 
-    // 1. Check if PDF is already cached in Supabase Storage
+    // 1. Check if PDF is already cached
     const pdfPath = `${slug}.pdf`;
     const { data: existing } = await supabase.storage
       .from('papers')
@@ -19,9 +19,8 @@ export async function GET(
       return NextResponse.json({ status: 'ready', pdfUrl: urlData.publicUrl });
     }
 
+    // 2. If tex already uploaded, Action was triggered — just wait
     const texPath = `${slug}.tex`;
-
-    // 2. If tex already uploaded, Action was already triggered — just wait
     const { data: texExists } = await supabase.storage
       .from('papers')
       .list('', { search: texPath });
@@ -33,10 +32,10 @@ export async function GET(
       });
     }
 
-    // 3. Get LaTeX from DB
+    // 3. Get paper from DB
     const { data: paper } = await supabase
       .from('papers')
-      .select('content')
+      .select('content, arxiv_id')
       .eq('slug', slug)
       .single();
 
@@ -44,9 +43,9 @@ export async function GET(
       return NextResponse.json({ error: '论文不存在或无内容' }, { status: 404 });
     }
 
-    // 4. Build standalone LaTeX and upload to Supabase
-    const standaloneTex = buildStandaloneTex(paper.content);
-    const texBlob = new Blob([standaloneTex], { type: 'text/plain' });
+    // 4. Upload the translated body content (NOT a standalone template)
+    // GitHub Actions will merge this into the original source
+    const texBlob = new Blob([paper.content], { type: 'text/plain' });
     const { error: uploadError } = await supabase.storage
       .from('papers')
       .upload(texPath, texBlob, { contentType: 'text/x-tex', upsert: true });
@@ -55,104 +54,39 @@ export async function GET(
       return NextResponse.json({ error: `上传失败: ${uploadError.message}` }, { status: 500 });
     }
 
-    // 5. Trigger GitHub Action to compile
+    // 5. Trigger GitHub Action
     const ghToken = process.env.GITHUB_TOKEN;
-    if (ghToken) {
-      await fetch('https://api.github.com/repos/paralym/paper-wiki/dispatches', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${ghToken}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
+    if (!ghToken) {
+      return NextResponse.json({ error: '缺少 GITHUB_TOKEN' }, { status: 500 });
+    }
+
+    const res = await fetch('https://api.github.com/repos/paralym/paper-wiki/dispatches', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ghToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({
+        event_type: 'compile-pdf',
+        client_payload: {
+          slug,
+          arxiv_id: paper.arxiv_id,
         },
-        body: JSON.stringify({
-          event_type: 'compile-pdf',
-          client_payload: { slug },
-        }),
-      });
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return NextResponse.json({ error: `触发编译失败: ${err}` }, { status: 500 });
     }
 
     return NextResponse.json({
       status: 'triggered',
-      message: 'PDF 编译已触发，通常需要 1-2 分钟。请稍后刷新页面。',
+      message: 'PDF 编译已触发，通常需要 2-3 分钟。页面会自动刷新。',
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'PDF 生成失败';
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}
-
-function buildStandaloneTex(translatedLatex: string): string {
-  let body = translatedLatex;
-  const docBegin = body.indexOf('\\begin{document}');
-  const docEnd = body.indexOf('\\end{document}');
-  if (docBegin !== -1) {
-    body = body.slice(docBegin + '\\begin{document}'.length);
-    if (docEnd !== -1) {
-      body = body.slice(0, body.indexOf('\\end{document}'));
-    }
-  }
-
-  // Extract title
-  let title = '论文翻译';
-  const titleMatch = body.match(/\\(?:icmltitle|title|acltitle)\s*\{([^}]*)\}/);
-  if (titleMatch) title = titleMatch[1];
-
-  // Extract authors
-  const authors: string[] = [];
-  const authorPattern = /\\(?:icmlauthor|author)\s*\{([^}]+)\}/g;
-  let m;
-  while ((m = authorPattern.exec(body)) !== null) {
-    if (!authors.includes(m[1])) authors.push(m[1]);
-  }
-
-  // Strip conference-specific commands
-  body = body
-    .replace(/\\icmltitle\s*\{[^}]*\}/g, '')
-    .replace(/\\icmlauthor\s*\{[^}]+\}\s*\{[^}]+\}/g, '')
-    .replace(/\\icmlaffiliation\s*\{[^}]+\}\s*\{[^}]*\}/g, '')
-    .replace(/\\icmlcorrespondingauthor\s*\{[^}]+\}\s*\{[^}]*\}/g, '')
-    .replace(/\\icmlkeywords\s*\{[^}]*\}/g, '')
-    .replace(/\\icmlsetsymbol\s*\{[^}]+\}\s*\{[^}]*\}/g, '')
-    .replace(/\\begin\{icmlauthorlist\}[\s\S]*?\\end\{icmlauthorlist\}/g, '')
-    .replace(/\\printAffiliationsAndNotice\s*\{[^}]*\}/g, '')
-    .replace(/\\aclfinalcopy/g, '')
-    .replace(/\\iclrfinalcopy/g, '')
-    .replace(/\\ifcolmsubmission[\s\S]*?\\fi/g, '')
-    .replace(/\\linenumbers/g, '')
-    .replace(/\\maketitle/g, '')
-    .replace(/\\input\s*\{[^}]+\}/g, '')
-    .replace(/\\bibliography\s*\{[^}]+\}/g, '')
-    .replace(/\\bibliographystyle\s*\{[^}]+\}/g, '')
-    .replace(/\\includegraphics(\[[^\]]*\])?\{[^}]+\}/g, '\\fbox{[图片]}');
-
-  return `\\documentclass[11pt,a4paper]{article}
-\\usepackage{xeCJK}
-\\setCJKmainfont{Noto Serif CJK SC}
-\\setCJKsansfont{Noto Sans CJK SC}
-\\setCJKmonofont{Noto Sans Mono CJK SC}
-\\usepackage[margin=1in]{geometry}
-\\usepackage{amsmath,amssymb,amsthm}
-\\usepackage{graphicx}
-\\usepackage{hyperref}
-\\usepackage{booktabs}
-\\usepackage{array}
-\\usepackage{float}
-\\usepackage{xcolor}
-\\usepackage{enumitem}
-\\usepackage{caption}
-\\usepackage{url}
-\\usepackage{microtype}
-
-\\title{${title}}
-\\author{${authors.length > 0 ? authors.join(' \\\\and ') : ''}}
-\\date{}
-
-\\begin{document}
-\\maketitle
-
-${body}
-
-\\end{document}
-`;
 }

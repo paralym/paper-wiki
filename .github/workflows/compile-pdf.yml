@@ -7,50 +7,171 @@ on:
 jobs:
   compile:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Install TeX Live with Chinese support
         run: |
           sudo apt-get update
-          sudo apt-get install -y texlive-xetex texlive-lang-chinese texlive-fonts-recommended texlive-science texlive-latex-extra fonts-noto-cjk
+          sudo apt-get install -y texlive-xetex texlive-lang-chinese texlive-fonts-recommended \
+            texlive-science texlive-latex-extra texlive-bibtex-extra biber \
+            fonts-noto-cjk fonts-noto-cjk-extra python3
 
-      - name: Download LaTeX source from Supabase
+      - name: Download original source from arXiv
+        env:
+          ARXIV_ID: ${{ github.event.client_payload.arxiv_id }}
+        run: |
+          echo "Downloading arXiv source for: $ARXIV_ID"
+          curl -L -f -o source.gz "https://export.arxiv.org/e-print/${ARXIV_ID}"
+          echo "Downloaded $(wc -c < source.gz) bytes"
+
+      - name: Extract source
+        run: |
+          mkdir -p source
+          cd source
+          # Try gunzip first
+          if gunzip -c ../source.gz > source.tar 2>/dev/null; then
+            if tar tf source.tar > /dev/null 2>&1; then
+              tar xf source.tar
+              rm source.tar
+              echo "Extracted tar archive"
+            else
+              # It's a plain tex file (gzipped)
+              mv source.tar main.tex
+              echo "Single tex file"
+            fi
+          else
+            # Not gzipped, might be raw tex
+            cp ../source.gz main.tex
+            echo "Raw tex file"
+          fi
+          echo "=== Files ==="
+          find . -type f | head -50
+
+      - name: Download translated body from Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           PAPER_SLUG: ${{ github.event.client_payload.slug }}
         run: |
-          TEX_URL="${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.tex"
-          echo "Downloading: $TEX_URL"
-          curl -f -o paper.tex "$TEX_URL"
-          cat paper.tex | head -20
+          curl -f -o /tmp/translated_body.tex \
+            "${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.tex"
+          echo "Translated body: $(wc -l < /tmp/translated_body.tex) lines, $(wc -c < /tmp/translated_body.tex) bytes"
+
+      - name: Merge translated body into original source
+        run: |
+          cd source
+
+          # Find main tex file (with \begin{document})
+          MAIN=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1)
+          if [ -z "$MAIN" ]; then
+            MAIN=$(find . -name '*.tex' -exec grep -l '\\begin{document}' {} \; | head -1)
+          fi
+          if [ -z "$MAIN" ]; then
+            MAIN=$(ls -S *.tex 2>/dev/null | head -1)
+          fi
+          echo "Main file: $MAIN"
+
+          # Use Python to do the merge precisely
+          python3 << 'PYEOF'
+          import os, re
+
+          main_file = os.environ.get('MAIN', '') or 'main.tex'
+          # Find the actual main file
+          for f in os.listdir('.'):
+              if f == main_file:
+                  break
+          else:
+              # Try find
+              for root, dirs, files in os.walk('.'):
+                  for f in files:
+                      path = os.path.join(root, f)
+                      if f.endswith('.tex'):
+                          with open(path) as fh:
+                              if '\\begin{document}' in fh.read():
+                                  main_file = path
+                                  break
+
+          print(f"Using main file: {main_file}")
+
+          with open(main_file, 'r', encoding='utf-8', errors='replace') as f:
+              original = f.read()
+
+          with open('/tmp/translated_body.tex', 'r', encoding='utf-8', errors='replace') as f:
+              translated = f.read()
+
+          # Find \begin{document} and \end{document}
+          begin_idx = original.find('\\begin{document}')
+          end_idx = original.rfind('\\end{document}')
+
+          if begin_idx == -1:
+              print("ERROR: No \\begin{document} found")
+              exit(1)
+
+          # Keep the original preamble (everything before \begin{document})
+          preamble = original[:begin_idx]
+
+          # Add xeCJK support for Chinese right before \begin{document}
+          # Check if xeCJK or ctex is already loaded
+          if 'xeCJK' not in preamble and 'ctex' not in preamble and 'CJK' not in preamble:
+              cjk_setup = """
+          \\usepackage{xeCJK}
+          \\setCJKmainfont{Noto Serif CJK SC}
+          \\setCJKsansfont{Noto Sans CJK SC}
+          \\setCJKmonofont{Noto Sans Mono CJK SC}
+          """
+              preamble = preamble.rstrip() + '\n' + cjk_setup + '\n'
+
+          # Build the new file: original preamble + translated body
+          new_content = preamble + '\\begin{document}\n' + translated + '\n\\end{document}\n'
+
+          with open(main_file, 'w', encoding='utf-8') as f:
+              f.write(new_content)
+
+          print(f"Merged: {len(preamble)} chars preamble + {len(translated)} chars body")
+          PYEOF
 
       - name: Compile with XeLaTeX
         run: |
-          # XeLaTeX supports CJK natively with system fonts
-          xelatex -interaction=nonstopmode -halt-on-error paper.tex || true
-          xelatex -interaction=nonstopmode paper.tex || true
-          ls -la paper.pdf 2>/dev/null && echo "PDF compiled successfully" || echo "PDF compilation failed"
+          cd source
+          MAIN=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1 || echo "main.tex")
+          echo "Compiling: $MAIN"
+
+          # First pass
+          xelatex -interaction=nonstopmode "$MAIN" 2>&1 | tail -20 || true
+
+          # Second pass (for references)
+          xelatex -interaction=nonstopmode "$MAIN" 2>&1 | tail -5 || true
+
+          # Check if PDF was generated
+          PDF="${MAIN%.tex}.pdf"
+          if [ -f "$PDF" ]; then
+            echo "SUCCESS: PDF generated ($(wc -c < "$PDF") bytes, $(pdfinfo "$PDF" 2>/dev/null | grep Pages || echo 'unknown pages'))"
+          else
+            echo "FAILED: No PDF generated"
+            # Show last errors
+            cat "${MAIN%.tex}.log" | grep "^!" | head -20
+            exit 1
+          fi
 
       - name: Upload PDF to Supabase Storage
-        if: ${{ hashFiles('paper.pdf') != '' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           PAPER_SLUG: ${{ github.event.client_payload.slug }}
         run: |
-          # Upload PDF via Supabase Storage REST API
-          PDF_PATH="${PAPER_SLUG}.pdf"
+          cd source
+          MAIN=$(grep -rl '\\begin{document}' *.tex 2>/dev/null | head -1 || echo "main.tex")
+          PDF="${MAIN%.tex}.pdf"
 
-          # Try to delete existing file first (ignore errors)
+          # Delete existing PDF (ignore errors)
           curl -s -X DELETE \
-            "${SUPABASE_URL}/storage/v1/object/papers/${PDF_PATH}" \
+            "${SUPABASE_URL}/storage/v1/object/papers/${PAPER_SLUG}.pdf" \
             -H "Authorization: Bearer ${SUPABASE_KEY}" || true
 
-          # Upload new PDF
+          # Upload PDF
           curl -f -X POST \
-            "${SUPABASE_URL}/storage/v1/object/papers/${PDF_PATH}" \
+            "${SUPABASE_URL}/storage/v1/object/papers/${PAPER_SLUG}.pdf" \
             -H "Authorization: Bearer ${SUPABASE_KEY}" \
             -H "Content-Type: application/pdf" \
-            --data-binary @paper.pdf
+            --data-binary @"$PDF"
 
-          echo "PDF uploaded to: ${SUPABASE_URL}/storage/v1/object/public/papers/${PDF_PATH}"
+          echo "PDF uploaded: ${SUPABASE_URL}/storage/v1/object/public/papers/${PAPER_SLUG}.pdf"
